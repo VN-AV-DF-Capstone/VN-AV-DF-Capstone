@@ -1,7 +1,7 @@
 """Edit these settings, then open a numbered script and select Run Python File."""
 from pathlib import Path
 
-DATASET_VERSION = 'dataset_v1'
+DATASET_VERSION = 'dataset_v2'
 DOWNLOAD_RUN = 'download_001'  # Rerun to resume; change when selecting a different source list.
 CUT_RUN = 'cut_001'
 SOURCE_GROUP = 'podcast'  # Fallback when a video has no tier; not a license label.
