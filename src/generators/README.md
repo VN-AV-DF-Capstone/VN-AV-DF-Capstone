@@ -49,7 +49,7 @@ face enhancer/sharpening. Output đã có sẽ không bị ghi đè. Nếu 06 b�
 
 ## Wav2Lip (các bước 00–03)
 
-Adapter dùng [Wav2Lip mã nguồn mở chính thức](https://github.com/Rudrabha/Wav2Lip), chưa fine-tune. Đã qua smoke 2 giây trên RTX 4050; batch GAN `wav2lip_gpu_batch_004` hiện có 33 cặp real/fake 4 giây đã chốt metadata sau khi dừng sớm. Video còn chờ review, chưa phải benchmark chất lượng fake hoặc accuracy detector. Tests dùng model giả lập kiểm tra hợp đồng dữ liệu; kết quả GPU thật được lưu riêng trong metadata run.
+Adapter dùng [Wav2Lip mã nguồn mở chính thức](https://github.com/Rudrabha/Wav2Lip), chưa fine-tune. Đã qua smoke 2 giây trên RTX 4050; batch GAN `wav2lip_gpu_batch_004` hiện có 33 cặp real/fake 4 giây đã chốt metadata sau khi dừng sớm. Video còn chờ review, chưa phải benchmark chất lượng fake hoặc accuracy detector. Run mặc định hiện tại là `wav2lip_multi_001`: V1 + part1, cả train/val/test, 2 giây; chưa chạy. Tests dùng model giả lập kiểm tra hợp đồng dữ liệu; kết quả GPU thật được lưu riêng trong metadata run.
 
 ## Chuẩn bị một lần
 
@@ -71,24 +71,24 @@ Upstream giới hạn code/model cho nghiên cứu/cá nhân/phi thương mại;
 ## Trình tự
 
 1. Run [00_check_setup.py](00_check_setup.py): kiểm tra mã nguồn, hai weights, import, nạp generator và forward với tensor thử batch 1/8 trên thiết bị đã chọn. Không tạo video. Kiểm tra này cũng chạy trước mỗi batch để checkpoint lỗi không tốn nhiều phút nhận diện mặt.
-2. Run [01_prepare.py](01_prepare.py): lấy `COUNT` clip Keep thuộc train, đủ 2 giây cộng biên 0,2 giây, ưu tiên trải ra các video nguồn. Ghép audio từ một clip train khác, cùng người nhưng khác video (donor không bắt buộc nằm trong COUNT clip). Tạo `data/manifests/dataset_v1/generators/<RUN_ID>/plan.csv` và `plan.json`; không tạo media.
-3. Run [02_generate.py](02_generate.py): gọi Wav2Lip theo từng clip, xuất COUNT fake và COUNT real đối chiếu nếu mọi mẫu thành công. Mỗi lần chạy in `[i/COUNT]`; log chi tiết trong `logs/`. `DEVICE = 'cuda'` đã được kiểm tra trên RTX 4050 Laptop 6 GB. Máy không có CUDA phải chọn CPU, sẽ chậm hơn. COUNT có thể là 1 để kiểm tra một clip.
-4. Mở video real/fake để kiểm tra đúng người, miệng, âm thanh và độ dài. `candidates.csv` ghi `review_status=pending`; chưa phải manifest đã duyệt để train. Không dùng điểm detector để lựa fake. Ghi nhận cả mẫu lỗi trước khi mở rộng batch.
+2. Run [01_prepare.py](01_prepare.py): mỗi split lấy tối đa `MAX_PER_SPLIT` clip Keep (`None` = tất cả), đủ thời lượng cộng biên 0,2 giây, chia đều theo người rồi theo video. Audio thay lời lấy từ một clip khác **cùng người, cùng split**, không trùng thời gian với clip nguồn; ưu tiên cùng video (cùng mic/phòng) để fake không lộ qua khác biệt âm học. Clip không có donor hợp lệ bị bỏ qua. Val/test đứng đầu plan, nên dừng sớm vẫn có đủ tập đánh giá. Tạo `data/manifests/dataset_v1/generators/<RUN_ID>/plan.csv` và `plan.json`; không tạo media.
+3. Run [02_generate.py](02_generate.py): gọi Wav2Lip theo từng clip, xuất một fake và một real đối chiếu cho mỗi dòng plan. Mỗi clip in `[i/N]`; log chi tiết trong `logs/`. `DEVICE = 'cuda'` đã được kiểm tra trên RTX 4050 Laptop 6 GB. Máy không có CUDA phải chọn CPU, sẽ chậm hơn. Bị ngắt hoặc có clip lỗi thì Run lại 02 với cùng `RUN_ID`: cặp đã đủ và hợp lệ được giữ, chỉ cặp dở/lỗi được tạo lại. Code, checkpoint hoặc settings đổi giữa chừng thì 02 từ chối, cần `RUN_ID` mới.
+4. Mở video real/fake để kiểm tra đúng người, miệng, âm thanh và độ dài. `candidates.csv` ghi `review_status=pending`. Bước 06 dùng thẳng file này, nên kết quả train trước khi review chỉ là sơ bộ. Không dùng điểm detector để lựa fake. Ghi nhận cả mẫu lỗi trước khi mở rộng batch.
 
-Muốn dừng có chủ ý sau N cặp: chờ terminal in `[N+1/COUNT]`, nhấn `Ctrl+C`, rồi Run [03_finalize_partial.py](03_finalize_partial.py). Bước 03 kiểm tra đủ hai file, FPS/frame/audio và chỉ ghi `candidates.csv` cho cặp hoàn chỉnh; summary ghi `partial=true` cùng số chưa chạy. Không chạy 02 lại vào cùng output. Nếu dừng giữa một clip, cặp đang xử lý không được công bố.
+Muốn dùng ngay phần đã xong: nhấn `Ctrl+C`, rồi Run [03_finalize_partial.py](03_finalize_partial.py). Bước 03 kiểm tra đủ hai file, FPS/frame/audio và chỉ ghi `candidates.csv` cho cặp hoàn chỉnh; summary ghi `partial=true` cùng số chưa chạy. Sau đó vẫn có thể Run 02 để làm tiếp; 02 ghi lại `candidates.csv` khi xong. Nếu dừng giữa một clip, cặp đang xử lý không được công bố.
 
-Các biến cần chỉnh tập trung ở [preparation/settings.py](preparation/settings.py): `RUN_ID`, `COUNT`, `NUM_FRAMES`, `DEVICE` và đường dẫn checkpoint/Python. Không phải đổi đường dẫn từng clip. Nếu chạy 00 báo thiếu weights, tải đủ rồi chạy lại; không cần đổi RUN_ID. Sau khi 01 đã tạo plan hoặc 02 đã tạo output, dùng RUN_ID mới khi thay cấu hình/chạy lại. Code không ghi đè run cũ, không tự resume batch dở.
+Các biến cần chỉnh tập trung ở [preparation/settings.py](preparation/settings.py): `RUN_ID`, `MANIFEST`, `MAX_PER_SPLIT`, `NUM_FRAMES`, `DEVICE` và đường dẫn checkpoint/Python. Không phải đổi đường dẫn từng clip. Nếu chạy 00 báo thiếu weights, tải đủ rồi chạy lại; không cần đổi RUN_ID. Sau khi 01 đã tạo plan, dùng RUN_ID mới khi thay cấu hình. Run đã hoàn tất không bị ghi đè.
 
 ## Output và cách tạo
 
 - Video ở `data/generated/dataset_v1/<RUN_ID>/`, tên kết thúc `__real.mp4` hoặc `__fake.mp4`.
 - Metadata ở `data/manifests/dataset_v1/generators/<RUN_ID>/`: `plan.csv`, `plan.json`, `generation.json`, `candidates.csv`, `summary.json`, `failures.csv` nếu có lỗi và `logs/`.
-- Fake kế thừa split/group/người/nguồn từ real; audio cũng phải thuộc train. Manifest nguồn và plan có SHA-256 để phát hiện thay đổi sau chuẩn bị. Hash checkpoint, S3FD, mã nguồn upstream/adapter và cấu hình được ghi trong `generation.json`; nguồn video/audio có hash trong candidates.
+- Fake kế thừa split/group/người/nguồn từ real; audio thay lời phải cùng người, cùng split và không trùng thời gian với clip nguồn. Manifest nguồn và plan có SHA-256 để phát hiện thay đổi sau chuẩn bị. Hash checkpoint, S3FD, mã nguồn upstream/adapter và cấu hình được ghi trong `generation.json`; nguồn video/audio có hash trong candidates.
 - Input hình chuẩn hóa 25 fps lossless, audio 16 kHz. Audio lái có thêm 0,2 giây im lặng bên phải phục vụ cửa sổ mel của upstream; video cuối và audio cuối đều cắt đúng 2 giây. Không kéo dài/loop nguồn trong output cuối.
-- Bridge giữ model, phát hiện mặt và vòng inference của upstream; đổi intermediate DIVX sang FFV1 và mux lossless. Real và fake cùng được encode cuối bằng H.264 CRF18/AAC128k. Đây là cấu hình adapter riêng, chưa tuyên bố tái lập chất lượng upstream hay xóa mọi dấu vết codec.
-- Không tự tải weights, đổi môi trường hoặc dùng val/test. Mẫu sinh thành công vẫn cần review. Các clip nguồn khác URL chưa được xác minh trùng nội dung ở bước này.
+- Bridge giữ model, phát hiện mặt và vòng inference của upstream; đổi intermediate DIVX sang FFV1 và mux lossless. Bước 02 đưa vào S3FD ảnh thu nhỏ cạnh dài tối đa 960 px và tắt cuDNN benchmark (như bước 07), rồi đổi tọa độ box về ảnh gốc; ảnh sinh/ghép giữ độ phân giải gốc. Real và fake cùng được encode cuối bằng H.264 CRF18/AAC128k. Đây là cấu hình adapter riêng, chưa tuyên bố tái lập chất lượng upstream hay xóa mọi dấu vết codec.
+- Không tự tải weights hoặc đổi môi trường. Mẫu sinh thành công vẫn cần review. Các clip nguồn khác URL chưa được xác minh trùng nội dung ở bước này.
 
-Sau review generator: chuẩn bị master real/fake được duyệt, tạo hai mức nén của từng master rồi mới lập `media_pairs.csv` cho AV-HuBERT. Không ghép real với fake thành một cặp consistency. Chưa có bước tự động xuất media_pairs từ candidates.
+Sau generator: [06_compress.py](../data/06_compress.py) nén mỗi master real/fake trong `candidates.csv` ở hai mức và ghi `media_pairs.csv` cho AV-HuBERT. Cặp consistency là hai mức nén của cùng một clip, không ghép real với fake.
 
 ## Chạy thử cải thiện chất lượng: 10 clip × 2 giây
 

@@ -53,6 +53,9 @@ def identity_nodes(row, protocol=STRICT_PROTOCOL):
         nodes.append(("video", row["canonical_source_id"].strip()))
     if row.get("program_id") and row.get("episode_id"):
         nodes.append(("episode", row["program_id"], row["episode_id"]))
+    if row.get("shared_group"):
+        # Manual link, e.g. two speakers of one channel/studio must share a split.
+        nodes.append(("shared", row["shared_group"].strip()))
     return nodes
 
 

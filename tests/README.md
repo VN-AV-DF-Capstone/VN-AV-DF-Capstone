@@ -2,11 +2,12 @@
 
 | Thư mục | Kiểm tra |
 |---|---|
-| `data/` | URL/thu thập/tải, cắt clip, manifest, split chống leakage, timeline và nén. |
+| `data/` | URL/thu thập/tải, cắt clip, manifest, split chống leakage, nhập part1, timeline, nén và `media_pairs.csv`. |
 | `quality/` | Face/curation, active-speaker, LASER, gộp điểm và calibration. |
 | `review/` | Giao diện review, chia/gộp công việc, ROI preview. |
-| `generators/` | Chọn train/source/audio, chống vượt split, output bất biến, FFmpeg real/fake bằng model stub; MuseTalk kiểm tra resume/checksum tải, 5 đầu vào 2 giây và thứ tự các cột so sánh bằng media tổng hợp. Không kiểm chứng chất lượng generator thật. |
+| `generators/` | Chọn source/audio cho cả ba split, chống vượt split và trùng thời gian, chạy tiếp sau lỗi, output bất biến, FFmpeg real/fake bằng model stub; MuseTalk kiểm tra resume/checksum tải, 5 đầu vào 2 giây và thứ tự các cột so sánh bằng media tổng hợp. Không kiểm chứng chất lượng generator thật. |
 | `models/` | Hai luồng có gradient, padding, supervision X/Y; nạp checkpoint giả lập, preprocessing và giữ độ lệch timestamp bằng media tổng hợp. Cần PyTorch, python_speech_features; media tests dùng FFmpeg. |
+| `evaluation/` | Định nghĩa AUC/EER/ngưỡng và CLI đánh giá trên feature giả lập. |
 
 Chạy tất cả từ root: `python -m unittest discover -s tests -q`.
 Chạy một nhóm, ví dụ data: `python -m unittest discover -s tests/data -q`.

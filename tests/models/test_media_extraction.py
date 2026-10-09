@@ -13,7 +13,7 @@ import torch
 
 from src.features.avhubert import _ProjectionBranch, load_checkpoint, load_source
 from src.features.extraction import extract, read_pairs
-from src.features.media import (FaceTracker, MediaConfig, decode_window, make_inputs,
+from src.features.media import (FaceTracker, MediaConfig, MediaProcessor, decode_window, make_inputs,
                                 run_media_command, save_mouth_preview)
 from src.training.dataset import PairedFeatureDataset
 
@@ -184,6 +184,69 @@ class ResEncoder(nn.Module):
         manifest.write_text(text)
         with self.assertRaisesRegex(ValueError, 'same media file'):
             read_pairs(manifest)
+
+    def test_failed_sample_is_logged_and_interrupted_run_resumes(self):
+        manifest = self.root / 'input.csv'
+        rows = []
+        for name in ('a', 'b', 'c'):
+            for view in ('crf23', 'crf32'):
+                (self.root / f'{name}_{view}.mp4').write_bytes(f'{name}{view}'.encode())
+            rows.append(dict(sample_id=name, label=int(name == 'b'), split='train',
+                             media_path=f'{name}_crf23.mp4', paired_media_path=f'{name}_crf32.mp4',
+                             view_id='crf23', paired_view_id='crf32', start_frame=0, num_frames=3))
+        with manifest.open('w', newline='') as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+            writer.writeheader()
+            writer.writerows(rows)
+        args = SimpleNamespace(video=None, manifest=manifest, out=self.root / 'features', previews=False,
+                               checkpoint=None, upstream=None, device='cpu', predictor=None, mean_face=None)
+        calls = []
+
+        class Processor:
+            provenance = {'test_fixture': True}
+            def __call__(self, path, *unused, **kwargs):
+                calls.append(Path(path).name)
+                if Path(path).name == 'b_crf23.mp4' and len(calls) < 4:
+                    raise KeyboardInterrupt  # Ctrl+C while the second sample runs.
+                if Path(path).name == 'c_crf32.mp4':
+                    raise ValueError('Insufficient landmarks')
+                return torch.zeros(1, 104, 3), torch.zeros(1, 1, 3, 8, 8), {'frames': 3}
+
+        def adapter(audio, video):
+            return torch.ones(1, 3, 4), torch.ones(1, 3, 6)
+        with patch('src.features.extraction.load_checkpoint', return_value=(adapter, MediaConfig(), {})), \
+                patch('src.features.extraction.MediaProcessor', return_value=Processor()), \
+                patch('src.features.extraction.importlib.metadata.version', return_value='test'), \
+                patch('src.features.extraction.run_media_command', return_value=b'ffmpeg test\n'):
+            with self.assertRaises(KeyboardInterrupt):
+                extract(args)
+            self.assertFalse((args.out / 'pairs.csv').exists())
+            extract(args)
+            with self.assertRaises(FileExistsError):
+                extract(args)
+        self.assertEqual(calls, ['a_crf23.mp4', 'a_crf32.mp4', 'b_crf23.mp4',
+                                 'b_crf23.mp4', 'b_crf32.mp4', 'c_crf23.mp4', 'c_crf32.mp4'])
+        with (args.out / 'pairs.csv').open(newline='') as handle:
+            self.assertEqual([r['sample_id'] for r in csv.DictReader(handle)], ['a', 'b'])
+        with (args.out / 'failures.csv').open(newline='') as handle:
+            failure, = csv.DictReader(handle)
+        self.assertEqual(failure['sample_id'], 'c')
+        self.assertIn('Insufficient landmarks', failure['error'])
+        self.assertEqual(PairedFeatureDataset(args.out / 'pairs.csv', 'train')[1]['label'], 1)
+
+    def test_face_detection_runs_downscaled_and_maps_boxes_back(self):
+        import dlib
+        processor = MediaProcessor.__new__(MediaProcessor)
+        processor.rectangle = dlib.rectangle
+        seen = []
+
+        def detector(image, upsample):
+            seen.append(image.shape)
+            return [dlib.rectangle(100, 50, 199, 149)]
+        processor.detector = detector
+        face, = processor.detect(np.zeros((1080, 1920), np.uint8))
+        self.assertEqual(seen, [(360, 640)])
+        self.assertEqual((face.left(), face.top(), face.right(), face.bottom()), (300, 150, 597, 447))
 
 
 if __name__ == '__main__':

@@ -41,7 +41,7 @@ Cập nhật 23/09/2026. Hướng hiện hành: **lip-sync audio–visual tiến
 
 URL video/playlist đã chọn → 01 thu thập danh sách → 02 tải → 03 cắt clip → 04 gộp manifest → các bước review + xác định người/nguồn → 05 chia split. Các file chạy có số ở src/data và src/tools/review; để chạy V2, đặt `DATASET_VERSION = 'dataset_v2'` trong `src/data/preparation/settings.py`. Máy kiểm kê đã đặt như vậy nhưng thay đổi này chưa commit. `dataset_v1` vẫn giữ manifest, clip và các run thử của giai đoạn sơ bộ. Generator Wav2Lip/MuseTalk có cấu hình riêng vẫn trỏ `dataset_v1`; không tự chuyển theo settings của pipeline data. Kiểm tra giấy phép tách riêng, hiện không chặn download.
 
-`src/data/preparation/compress.py` nhận master đã có nhãn/split để tạo bản nén. Chưa có generator nối tự động từ split tới fake. Tất cả lệnh phải nhận dataset/đường dẫn mới, không lấy manifest từ archive làm mặc định.
+`src/data/preparation/compress.py` nhận master đã có nhãn/split để tạo bản nén. Từ 09/10/2026 có luồng nối sẵn V1 + part1 → Wav2Lip cả ba split → nén → feature → train → đánh giá (bảng lệnh ở [src/README.md](src/README.md)); mới kiểm tra bằng media tổng hợp, chưa chạy trên dữ liệu thật. Tất cả lệnh phải nhận dataset/đường dẫn mới, không lấy manifest từ archive làm mặc định.
 
 Hướng dẫn: [src/data/README.md](src/data/README.md), [review](src/tools/README.md), [DATA_PROTOCOL](docs/research/DATA_PROTOCOL.md).
 

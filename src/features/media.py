@@ -12,6 +12,8 @@ from scipy.io import wavfile
 
 from src.features.avhubert import load_source, sha256
 
+DETECTION_SIDE = 640  # HOG input size; landmarks still use the full-resolution frame.
+
 
 @dataclass(frozen=True)
 class MediaConfig:
@@ -182,6 +184,7 @@ class MediaProcessor:
                 raise FileNotFoundError(f'Missing face preprocessing asset: {path}')
         import dlib
         self.detector = dlib.get_frontal_face_detector()
+        self.rectangle = dlib.rectangle
         self.predictor = dlib.shape_predictor(str(predictor))
         self.mean_face = np.load(mean_face, allow_pickle=False)
         if self.mean_face.shape != (68, 2) or not np.isfinite(self.mean_face).all():
@@ -190,12 +193,23 @@ class MediaProcessor:
         self.align = load_source(align_path, '_avhubert_align')
         self.config = config
         self.provenance = dict(preprocessing='aligned_mouth_logfbank_v2', config=asdict(config),
-                               landmark_detector='dlib_hog_tracked_face', max_missing_run=3,
+                               landmark_detector='dlib_hog_tracked_face', detection_side=DETECTION_SIDE,
+                               max_missing_run=3,
                                face_tracking=dict(initial='single_face', min_iou=FaceTracker.min_iou,
                                                   min_margin=FaceTracker.min_margin),
                                max_missing_fraction=0.1, mouth_size=96, smoothing_frames=12,
                                roi_reencode=False, align_sha256=sha256(align_path),
                                predictor_sha256=sha256(predictor), mean_face_sha256=sha256(mean_face))
+
+    def detect(self, gray):
+        """HOG on a copy at most DETECTION_SIDE px; boxes map back to the full frame."""
+        scale = min(1., DETECTION_SIDE / max(gray.shape))
+        if scale == 1:
+            return list(self.detector(gray, 1))
+        small = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        return [self.rectangle(round(face.left() / scale), round(face.top() / scale),
+                               round(face.right() / scale), round(face.bottom() / scale))
+                for face in self.detector(small, 1)]
 
     def __call__(self, path, start_frame, num_frames, preview_path=None):
         with tempfile.TemporaryDirectory(prefix='avhubert_') as temporary:
@@ -210,7 +224,7 @@ class MediaProcessor:
                     if not ok:
                         break
                     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                    faces = self.detector(gray, 1)
+                    faces = self.detect(gray)
                     detection_counts.append(len(faces))
                     try:
                         selected = tracker.select(faces)

@@ -4,12 +4,32 @@ Use explicit CRFs. Encode audio with the same policy from each master at all CRF
 Record failures rather than silently hiding missing variants; never chain encodes.
 """
 import argparse
+from collections import defaultdict
 import hashlib
 import json
+import os
 from pathlib import Path
 from src.data.preparation.compression_media import audio_target_samples, video_contract, compress
 from src.data.preparation.manifest_io import read_rows, safe_id, unique_rows, write_rows
 from src.data.preparation.timeline_contract import build_timeline_contract, validate_timeline_against_media
+
+
+def media_pair_rows(variants, crfs, root):
+    """Feature-extraction input: per master, its first two CRF views of the same window."""
+    views = defaultdict(dict)
+    for row in variants:
+        views[row['parent_clip_id']][int(row['crf'])] = row
+    rows = []
+    for master, by_crf in sorted(views.items()):
+        if len(crfs) < 2 or crfs[0] not in by_crf or crfs[1] not in by_crf:
+            continue  # A master missing a view is listed in failures.csv.
+        first, second = by_crf[crfs[0]], by_crf[crfs[1]]
+        rows.append(dict(sample_id=master, label=first['label'], split=first['split'],
+                         media_path=os.path.relpath(first['file_path'], root),
+                         paired_media_path=os.path.relpath(second['file_path'], root),
+                         view_id=f'crf{crfs[0]}', paired_view_id=f'crf{crfs[1]}',
+                         start_frame=0, num_frames=first['frames']))
+    return rows
 
 
 def main():
@@ -65,12 +85,15 @@ def main():
                 result = dict(row)
                 result.update(timeline)
                 result.update(clip_id=variant_id, file_path=str(destination.resolve()), parent_clip_id=cid,
-                              source_clip=parent, compression_id=config_id, crf=crf)
+                              source_clip=parent, compression_id=config_id, crf=crf, frames=video['frames'])
                 successes.append(result)
             except Exception as exc:
                 failures.append(dict(clip_id=cid, crf=crf, error=str(exc)))
     if successes:
         write_rows(output / 'variants.csv', successes)
+        pairs = media_pair_rows(successes, crfs, output.resolve())
+        if pairs:
+            write_rows(output / 'media_pairs.csv', pairs)
     if failures:
         write_rows(output / 'failures.csv', failures)
     summary = dict(master_clips=len(rows), requested_variants=len(rows)*len(crfs),

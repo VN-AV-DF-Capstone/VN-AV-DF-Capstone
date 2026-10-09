@@ -62,7 +62,7 @@ class PairedFeatureDataset(Dataset):
         return dict(audio=first['audio'].float(), visual=first['visual'].float(),
                     paired_audio=second['audio'].float(), paired_visual=second['visual'].float(),
                     label=int(row['label']), sample_id=row['sample_id'],
-                    extractor_id=first['extractor_id'])
+                    extractor_id=first['extractor_id'], view_ids=(first['view_id'], second['view_id']))
 
 
 def collate_pairs(samples):
@@ -74,4 +74,5 @@ def collate_pairs(samples):
     result['labels'] = torch.tensor([sample['label'] for sample in samples], dtype=torch.float32)
     result['sample_ids'] = [sample['sample_id'] for sample in samples]
     result['paired_sample_ids'] = list(result['sample_ids'])
+    result['view_ids'] = [sample['view_ids'] for sample in samples]
     return result

@@ -10,15 +10,16 @@ CHECKPOINT = ROOT / 'weights/avhubert/base_vox_iter5.pt'
 UPSTREAM = ROOT / 'external/av_hubert'
 PREDICTOR = ROOT / 'weights/face_landmarks/shape_predictor_68_face_landmarks.dat'
 MEAN_FACE = ROOT / 'weights/face_landmarks/20words_mean_face.npy'
-INPUT_MANIFEST = ROOT / 'data/manifests/dataset_v1/features/media_pairs.csv'
-INPUT_VIDEO = ROOT / 'data/real/dataset_v1/cut_cut_001/podcast/0_18/media/5CNS_gaH16c_s0000015202_e0000020958.mp4'
+# Written by src/data/06_compress.py. Run again to resume after an interruption.
+INPUT_MANIFEST = ROOT / 'data/compressed/dataset_v1/wav2lip_multi_001_crf23_32/media_pairs.csv'
+INPUT_VIDEO = None  # Set one video path for a single-clip smoke check instead.
 
-OUTPUT = ROOT / 'cache/features/dataset_v1/train_smoke_003_retry_001'
+OUTPUT = ROOT / 'cache/features/dataset_v1/wav2lip_multi_001_crf23_32'
 
 START_FRAME = 0
 NUM_FRAMES = 50  # 2 giây ở 25 fps
 DEVICE = 'cpu'
-SAVE_PREVIEWS = True  # Exact mouth input with audio, plus sampled frames beside each feature cache.
+SAVE_PREVIEWS = False  # True writes the exact mouth input per view; slow for a whole dataset.
 
 
 def main():

@@ -22,35 +22,64 @@ def digest(path):
     return value.hexdigest()
 
 
-def select_plan(rows, count, frames, run_id):
+def interleave(groups):
+    """Round robin over sorted group keys; deterministic regardless of row order."""
+    groups = [group for _, group in sorted(groups.items())]
+    return [group[i] for i in range(max(map(len, groups), default=0)) for group in groups if i < len(group)]
+
+
+def overlaps(a, b):
+    """Clips of one video may share speech; unknown times count as overlapping."""
+    if a['source_video'] != b['source_video']:
+        return False
+    try:
+        a0, a1, b0, b1 = (float(row[key]) for row in (a, b) for key in ('start_time', 'end_time'))
+    except (KeyError, TypeError, ValueError):
+        return True
+    return not all(map(math.isfinite, (a0, a1, b0, b1))) or (a0 < b1 and b0 < a1)
+
+
+def pick_donor(source, candidates):
+    """Same speaker and split, no shared speech; same video first (same mic/room)."""
+    usable = [row for row in candidates if row['speaker_id'] == source['speaker_id']
+              and row['split'] == source['split'] and not overlaps(source, row)]
+    same_video = [row for row in usable if row['source_video'] == source['source_video']]
+    return (same_video or usable or [None])[0]
+
+
+def select_plan(rows, count, frames, run_id, splits=('val', 'test', 'train')):
+    """At most `count` sources per split (None = all), spread over speakers, then videos.
+
+    Val/test come first, so an early stop still leaves complete evaluation splits.
+    """
     safe_id(run_id)
-    if not 1 <= count <= 100 or not 25 <= frames <= 250:
-        raise ValueError('Use 1..100 clips and 25..250 frames for this development runner')
+    if (count is not None and count < 1) or not 25 <= frames <= 250:
+        raise ValueError('Use count >= 1 (or None) and 25..250 frames')
     verify_splits(rows)
-    sources = defaultdict(list)
+    sources = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
     for row in sorted(rows, key=lambda r: r['clip_id']):
         if row.get('label') != '0' or row.get('decision') != 'keep':
             raise ValueError('Input must contain only reviewed real clips')
         duration = float(row.get('duration', 'nan'))
-        if row['split'] == 'train' and math.isfinite(duration) and duration >= frames / 25 + .2:
-            sources[row['source_video']].append(row)
-    # Round robin across sources, deterministic regardless of CSV row ordering.
-    pool = [group[i] for i in range(max(map(len, sources.values()), default=0))
-            for _, group in sorted(sources.items()) if i < len(group)]
-    if len(pool) < count:
-        raise ValueError(f'Only {len(pool)} eligible train clips; requested {count}')
-    selected = pool[:count]
+        if math.isfinite(duration) and duration >= frames / 25 + .2:
+            sources[row['split']][row['speaker_id']][row['source_video']].append(row)
     plan = []
-    for i, source in enumerate(selected):
-        candidates = pool[i+1:] + pool[:i]
-        donor = next((r for r in candidates if r['source_video'] != source['source_video']
-                      and r['speaker_id'] == source['speaker_id']), None)
-        if donor is None:
-            raise ValueError('Need another train video of the same speaker for replacement audio')
-        plan.append(dict(clip_id=f'{source["clip_id"]}__{run_id}__fake',
-                         source_clip=source['clip_id'], audio_source_clip_id=donor['clip_id'],
-                         start_frame=0, audio_start_frame=0, num_frames=frames,
-                         generator='wav2lip', label=1, split='train'))
+    for split in splits:
+        pool = interleave({speaker: interleave(videos) for speaker, videos in sources[split].items()})
+        selected = 0
+        for i, source in enumerate(pool):
+            if selected == count:
+                break
+            donor = pick_donor(source, pool[i+1:] + pool[:i])
+            if donor is None:
+                continue  # No usable same-speaker audio in this split.
+            selected += 1
+            plan.append(dict(clip_id=f'{source["clip_id"]}__{run_id}__fake',
+                             source_clip=source['clip_id'], audio_source_clip_id=donor['clip_id'],
+                             start_frame=0, audio_start_frame=0, num_frames=frames,
+                             generator='wav2lip', label=1, split=split))
+    if not plan:
+        raise ValueError('No eligible clip has a same-speaker, same-split, non-overlapping donor')
     return plan
 
 
@@ -61,12 +90,10 @@ def validate_plan(plan, rows):
     for item in plan:
         if item.get('generator') != 'wav2lip' or str(item.get('label')) != '1':
             raise ValueError('Expected a Wav2Lip fake plan')
-        inherited = inherit_variant_split(item, rows)
-        if inherited['split'] != 'train':
-            raise ValueError('This preliminary runner only uses train; leave val/test untouched')
+        inherit_variant_split(item, rows)  # Source and donor must share the variant's split.
         source, donor = index[item['source_clip']], index[item['audio_source_clip_id']]
-        if source['speaker_id'] != donor['speaker_id'] or source['source_video'] == donor['source_video']:
-            raise ValueError('Use same-speaker replacement audio from a different train video')
+        if source['speaker_id'] != donor['speaker_id'] or overlaps(source, donor):
+            raise ValueError('Use same-speaker replacement audio that does not overlap the source')
         frames = int(item['num_frames'])
         if not 25 <= frames <= 250:
             raise ValueError('Expected 25..250 frames')
@@ -91,26 +118,29 @@ def prepare(settings):
     if settings.PLAN_DIR.exists():
         raise FileExistsError(f'Plan exists; use a new RUN_ID: {settings.PLAN_DIR}')
     rows = read_rows(settings.MANIFEST)
-    plan = select_plan(rows, settings.COUNT, settings.NUM_FRAMES, settings.RUN_ID)
+    plan = select_plan(rows, settings.MAX_PER_SPLIT, settings.NUM_FRAMES, settings.RUN_ID)
     index = validate_plan(plan, rows)
     for item in plan:
         for key in ('source_clip', 'audio_source_clip_id'):
             media_path(index[item[key]], settings.MANIFEST)
     write_rows(settings.PLAN_DIR / 'plan.csv', plan)
-    config = dict(schema='wav2lip_plan_v1', run_id=settings.RUN_ID,
+    counts = {split: sum(item['split'] == split for item in plan) for split in ('train', 'val', 'test')}
+    config = dict(schema='wav2lip_plan_v2', run_id=settings.RUN_ID,
                   manifest_sha256=digest(settings.MANIFEST),
                   plan_sha256=digest(settings.PLAN_DIR / 'plan.csv'),
-                  count=len(plan), num_frames=settings.NUM_FRAMES, split='train',
-                  audio_policy='same_speaker_other_train_video', selection='source_round_robin_sorted')
+                  count=len(plan), counts=counts, max_per_split=settings.MAX_PER_SPLIT,
+                  num_frames=settings.NUM_FRAMES,
+                  audio_policy='same_speaker_same_split_no_overlap_prefer_same_video',
+                  selection='speaker_then_video_round_robin_val_test_first')
     (settings.PLAN_DIR / 'plan.json').write_text(json.dumps(config, indent=2), encoding='utf-8')
-    print(f'Prepared {len(plan)} train-only requests: {settings.PLAN_DIR / "plan.csv"}')
+    print(f'Prepared {len(plan)} requests {counts}: {settings.PLAN_DIR / "plan.csv"}')
 
 
 def worker_command(settings, check=False):
     command = [str(settings.GENERATOR_PYTHON), str(Path(__file__).with_name('worker.py').resolve()),
                '--upstream', str(settings.UPSTREAM.resolve()),
                '--checkpoint', str(settings.CHECKPOINT.resolve()), '--device', settings.DEVICE]
-    return command + (['--check'] if check else [])
+    return command + (['--check'] if check else ['--fast-detection'])
 
 
 def worker_environment(settings):
@@ -162,7 +192,7 @@ def export_control(video, audio, destination, frames):
 
 
 def run_worker(settings, work, log_path):
-    with log_path.open('x', encoding='utf-8') as log:
+    with log_path.open('a', encoding='utf-8') as log:  # A resumed retry appends.
         result = subprocess.run(worker_command(settings), cwd=work, env=worker_environment(settings),
                                 stdout=log, stderr=subprocess.STDOUT)
     if result.returncode:
@@ -266,9 +296,12 @@ def finalize_existing(settings):
 
 
 def generate(settings):
+    """Run again after an interruption: verified complete pairs are kept and skipped."""
     config, plan, index = load_locked_plan(settings)
-    if settings.MEDIA_DIR.exists():
-        raise FileExistsError(f'Generation run already exists; use a new RUN_ID: {settings.MEDIA_DIR}')
+    summary_path = settings.PLAN_DIR / 'summary.json'
+    if (summary_path.exists() and
+            json.loads(summary_path.read_text(encoding='utf-8'))['status'] == 'awaiting_visual_review'):
+        raise FileExistsError(f'Generation run is complete; use a new RUN_ID: {settings.MEDIA_DIR}')
     check_setup(settings)
     for item in plan:
         for key in ('source_clip', 'audio_source_clip_id'):
@@ -283,12 +316,29 @@ def generate(settings):
                       worker_sha256=digest(Path(__file__).with_name('worker.py')),
                       inference_audio_right_padding_seconds=.2,
                       intermediate='ffv1_pcm16', final_encoding='libx264_crf18_aac128k_16k_mono',
-                      pads=[0, 10, 0, 0], smoothing=True, face_batch=1, wav2lip_batch=8)
-    settings.MEDIA_DIR.mkdir(parents=True, exist_ok=False)
-    (settings.PLAN_DIR / 'logs').mkdir(exist_ok=False)
-    (settings.PLAN_DIR / 'generation.json').write_text(json.dumps(provenance, indent=2), encoding='utf-8')
+                      pads=[0, 10, 0, 0], smoothing=True, face_batch=1, wav2lip_batch=8,
+                      detector_input_max_side=960, cudnn_benchmark=False)
+    provenance_path = settings.PLAN_DIR / 'generation.json'
+    if settings.MEDIA_DIR.exists():
+        if json.loads(provenance_path.read_text(encoding='utf-8')) != provenance:
+            raise ValueError('Generator, code or settings changed since this run started; use a new RUN_ID')
+        print('Resuming: verified complete pairs are skipped', flush=True)
+    else:
+        settings.MEDIA_DIR.mkdir(parents=True, exist_ok=False)
+        (settings.PLAN_DIR / 'logs').mkdir(exist_ok=False)
+        provenance_path.write_text(json.dumps(provenance, indent=2), encoding='utf-8')
     successful, failures = [], []
     for number, item in enumerate(plan, 1):
+        fake_path = settings.MEDIA_DIR / (item['clip_id'] + '.mp4')
+        real_path = settings.MEDIA_DIR / (item['clip_id'].removesuffix('__fake') + '__real.mp4')
+        if fake_path.exists() and real_path.exists():
+            try:
+                successful.extend(candidate_rows(settings, item, index, fake_path, real_path))
+                continue
+            except (OSError, ValueError, RuntimeError):
+                pass  # Interrupted while writing; regenerate this pair.
+        for path in (fake_path, real_path):
+            path.unlink(missing_ok=True)
         print(f'[{number}/{len(plan)}] {item["clip_id"]}', flush=True)
         try:
             successful.extend(generate_one(settings, item, index, settings.MEDIA_DIR,
@@ -296,14 +346,16 @@ def generate(settings):
         except (OSError, ValueError, RuntimeError) as exc:
             failures.append(dict(clip_id=item['clip_id'], error=str(exc)))
             print(f'FAILED: {exc}', flush=True)
+    for name in ('candidates.csv', 'failures.csv', 'summary.json'):
+        (settings.PLAN_DIR / name).unlink(missing_ok=True)  # Replaced by this complete pass.
     if successful:
         write_rows(settings.PLAN_DIR / 'candidates.csv', successful)
     if failures:
         write_rows(settings.PLAN_DIR / 'failures.csv', failures)
     summary = dict(requested=len(plan), successful_pairs=len(successful)//2, failures=len(failures),
                    status='incomplete' if failures else 'awaiting_visual_review')
-    (settings.PLAN_DIR / 'summary.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
+    summary_path.write_text(json.dumps(summary, indent=2), encoding='utf-8')
     print(json.dumps(summary))
     if failures:
-        raise RuntimeError('Some clips failed; inspect failures.csv/logs before preparing another run')
+        raise RuntimeError('Some clips failed; inspect failures.csv/logs, then run again to retry them')
     print(f'Open generated videos for review: {settings.MEDIA_DIR}')

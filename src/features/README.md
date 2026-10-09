@@ -58,7 +58,7 @@ python src/features/01_extract.py --video "data/real/path/to/clip.mp4" --start-f
 
 ## 4. Chạy các cặp nén cho training
 
-Sau review, khóa split người/nguồn, tạo fake và bản nén, điền manifest theo `configs/templates/media_pairs.csv`. Đặt `INPUT_VIDEO = None`, sửa `INPUT_MANIFEST`, chọn `OUTPUT` mới rồi Run.
+`src/data/06_compress.py` tự ghi manifest này (`media_pairs.csv`, theo `configs/templates/media_pairs.csv`) cạnh các bản nén. Mặc định `INPUT_VIDEO = None` và `INPUT_MANIFEST` trỏ tới file đó; chỉ cần Run.
 
 | Cột | Ý nghĩa |
 |---|---|
@@ -71,12 +71,12 @@ Sau review, khóa split người/nguồn, tạo fake và bản nén, điền man
 
 **Không ghép video real với video fake thành một cặp consistency.** Manifest phải đến từ nguồn nén có provenance; extractor không thể chứng minh chỉ từ nội dung media rằng hai file là các bản nén của cùng clip. Nó cũng không thay thế bước chống leakage.
 
-Mỗi view được xử lý riêng và lưu feature riêng. Kết quả đầy đủ có `pairs.csv`, các `.pt`, và `run.json`. `pairs.csv` dùng trực tiếp với `src/training/01_train.py --manifest ...`. Cả baseline Y và X dùng cùng CSV, chỉ khác consistency weight. Lần chạy lỗi dừng tại mẫu đang xử lý, không âm thầm loại mẫu; không có `pairs.csv` hoàn tất. Không ghi đè run cũ, hãy chọn tên output khác sau khi sửa lỗi.
+Mỗi view được xử lý riêng và lưu feature riêng. Kết quả đầy đủ có `pairs.csv`, các `.pt`, và `run.json`. `pairs.csv` dùng trực tiếp với `src/training/01_train.py --manifest ...`. Cả baseline Y và X dùng cùng CSV, chỉ khác consistency weight. Mẫu nào lỗi (ví dụ không bám được mặt) được ghi vào `failures.csv` kèm nhãn/split và bị loại khỏi `pairs.csv`; cuối run in số real/fake còn lại mỗi split. Kiểm tra tỷ lệ lỗi theo nhãn trước khi tin kết quả. Bị ngắt thì Run lại cùng `OUTPUT`: cache trùng khớp extractor, manifest và hash media được dùng lại. Run đã có `pairs.csv` không bị ghi đè; đổi code hoặc manifest thì cần `OUTPUT` mới.
 
 ## 5. Code xử lý những gì?
 
 1. FFmpeg cắt hai luồng theo cùng cửa sổ, chuyển video sang 25 fps lossless tạm thời và audio PCM mono 16 kHz. Giữ độ lệch timestamp vốn có giữa hai stream; không tự chỉnh môi/tiếng cho khớp.
-2. Dlib tìm và bám một mặt, rồi lấy 68 landmark trên từng frame. Dừng khi chọn mặt không rõ ràng hoặc mất target quá lâu; cho nội suy tối đa 3 frame liên tiếp và tổng không quá 10%. Đây là quy tắc preprocessing có ghi lại, cần kiểm tra tỷ lệ lỗi theo nhãn/generator.
+2. Dlib tìm và bám một mặt trên bản thu nhỏ cạnh dài 640 px (nhanh hơn khoảng 11 lần so với ảnh 1080p), đổi box về ảnh gốc, rồi lấy 68 landmark trên frame gốc. Dừng khi chọn mặt không rõ ràng hoặc mất target quá lâu; cho nội suy tối đa 3 frame liên tiếp và tổng không quá 10%. Đây là quy tắc preprocessing có ghi lại, cần kiểm tra tỷ lệ lỗi theo nhãn/generator.
 3. Dùng `crop_patch` của upstream để căn chỉnh mặt và cắt miệng 96×96; grayscale rồi center-crop, chuẩn hóa theo cấu hình checkpoint (Base thường 88×88). Không dùng ROI YOLO phục vụ review. Không nén lại ROI bằng CRF 20 như bước xuất file của upstream.
 4. Audio dùng log-filterbank 26 chiều, ghép mỗi 4 frame thành 104 chiều tại 25 Hz, rồi chuẩn hóa theo checkpoint. Chỉ cho lệch chiều dài tối đa một frame ở biên; không kéo giãn feature để che lỗi timeline.
 5. Nạp **đúng weights hai nhánh trước fusion**: visual ResEncoder + projection và audio projection. Đóng băng, `eval`, không gradient. Với Base, mỗi đầu ra là `[T,768]`. Thiếu/sai key weights thì lỗi, không dùng random weights thay thế.

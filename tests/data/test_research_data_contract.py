@@ -52,6 +52,17 @@ class ResearchDataContractTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Leakage'):
             verify_splits(output)
 
+    def test_shared_group_keeps_two_speakers_of_one_channel_together(self):
+        rows = [real('a','s1','v1',shared_group='channel:c'), real('b','s2','v2',shared_group='channel:c'),
+                real('c','s3','v3'), real('d','s4','v4')]
+        output = split_real_rows(rows, (0.5,0.25,0.25), seed=1)
+        splits = {r['clip_id']: r['split'] for r in output}
+        self.assertEqual(splits['a'], splits['b'])
+        other = next(s for s in ('train', 'val', 'test') if s != splits['a'])
+        moved = [dict(r, split=other) if r['clip_id'] == 'b' else r for r in output]
+        with self.assertRaisesRegex(ValueError, 'shared'):
+            verify_splits(moved)
+
     def test_single_speaker_mode_keeps_sources_reuploads_and_episodes_together(self):
         protocol = 'source_disjoint_single_speaker'
         rows = [real('a', 'host', 'v1'), real('b', 'host', 'v1'),
@@ -138,6 +149,11 @@ class ResearchDataContractTest(unittest.TestCase):
             self.assertEqual({r['group_id'] for r in variants}, {'g1'})
             audios = [subprocess.check_output(['ffmpeg','-v','error','-i',r['file_path'],'-f','s16le','-acodec','pcm_s16le','-']) for r in variants]
             self.assertTrue(all(audio == audios[0] for audio in audios))
+            from src.features.extraction import read_pairs
+            pairs = read_pairs(root/'encoded/media_pairs.csv')
+            self.assertEqual([(r['sample_id'], r['label']) for r in pairs], [('fake', 1), ('real', 0)])
+            self.assertEqual({(r['view_id'], r['paired_view_id'], r['num_frames']) for r in pairs}, {('crf18', 'crf23', 25)})
+            self.assertTrue(all(r['media_path'].name.endswith('crf18.mp4') for r in pairs))
             self.assertNotEqual(subprocess.run(command,cwd=ROOT,capture_output=True).returncode, 0)
             bad = root/'missing.csv'
             write_rows(bad,[dict(base,clip_id='missing',file_path=str(root/'absent.mp4'))])

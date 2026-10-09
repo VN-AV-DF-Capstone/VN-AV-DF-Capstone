@@ -51,6 +51,8 @@ def main():
     parser.add_argument('--device', choices=('cpu', 'cuda'), default='cpu')
     parser.add_argument('--check', action='store_true')
     parser.add_argument('--quality-preview', action='store_true')
+    parser.add_argument('--fast-detection', action='store_true',
+                        help='S3FD on frames resized to 960 px, cuDNN benchmark off; generation unchanged')
     args = parser.parse_args()
     import torch
     import librosa
@@ -77,10 +79,14 @@ def main():
     if args.check:
         return
     inference.load_model = lambda path: model
-    if args.quality_preview:
+    if args.quality_preview or args.fast_detection:
         sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    if args.quality_preview:
         from src.generators.preparation.preview_quality import install_wav2lip
-        install_wav2lip(inference)
+        install_wav2lip(inference)  # Includes the fast detector.
+    elif args.fast_detection:
+        from src.generators.preparation.preview_quality import install_detector
+        install_detector()
     # Use lossless intermediate media for both classes; avoid a fake-only DIVX pass.
     fourcc = inference.cv2.VideoWriter_fourcc
     inference.cv2.VideoWriter_fourcc = lambda *code: fourcc(*('FFV1' if ''.join(code) == 'DIVX' else code))

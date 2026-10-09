@@ -1,16 +1,18 @@
-"""STEP 06: AFTER generation and master manifest preparation (generator is not implemented)."""
+"""STEP 06: AFTER Wav2Lip generation: compress every real/fake master at two CRFs.
+
+Also writes media_pairs.csv (two CRF views per master) for src/features/01_extract.py.
+"""
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from src.data.preparation._run import run
-from src.data.preparation.settings import ROOT, DATASET_VERSION, MANIFESTS
+from src.generators.preparation import settings as generator
 
-CRFS = ''  # Fill the levels agreed for the experiment; no final-test defaults.
-COMPRESSION_RUN = 'compression_001'
+CRFS = '23,32'  # Two training/consistency views. Keep a stronger level for the final held-out test.
+MASTERS = generator.PLAN_DIR / 'candidates.csv'  # Real controls and fakes from the generator run.
+COMPRESSION_RUN = f"{generator.RUN_ID}_crf{CRFS.replace(',', '_')}"
 
 if __name__ == '__main__':
-    if not CRFS and '--help' not in sys.argv:
-        raise SystemExit('Set CRFS here and prepare masters.csv with real/fake provenance before running.')
-    run('src.data.preparation.compress', ['--input_csv', MANIFESTS / 'masters.csv',
-                             '--out_dir', ROOT / 'data' / 'compressed' / DATASET_VERSION / COMPRESSION_RUN,
+    run('src.data.preparation.compress', ['--input_csv', MASTERS,
+                             '--out_dir', generator.ROOT / 'data/compressed' / generator.DATASET / COMPRESSION_RUN,
                              '--crfs', CRFS])

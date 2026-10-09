@@ -12,8 +12,9 @@ Sửa [preparation/settings.py](preparation/settings.py) khi đổi phiên bản
 | 04 | [04_build_manifest.py](04_build_manifest.py) | Accepted CSV/media + nguồn đã chọn → `data/manifests/<dataset_version>/clips.csv`, giữ nhóm nguồn/kênh/tập/bản gốc. |
 | Review | [Các bước review](../tools/review/README.md) | Xem/nghe, phân công, gộp quyết định → `reviewed_clips.csv`. **Bổ sung speaker_id nhất quán xuyên tập trước bước 05.** |
 | 05 | [05_build_splits.py](05_build_splits.py) | Clip đã review + người/nguồn → `real_splits.csv`, kiểm tra leakage. |
-| Generator | [Wav2Lip 00/01/02](../generators/README.md) | Có settings riêng vẫn chọn `dataset_v1`. Kiểm tra setup → chọn batch train → tạo real/fake candidates. Cần weights và review output; chưa tự nối sang bước 06. |
-| 06 | [06_compress.py](06_compress.py) | Chỉ chạy khi có `masters.csv` real/fake đầy đủ nguồn/nhãn/split và đã điền CRFS trong file. Không tự nối từ bước 05. |
+| 07 (trước generator) | [07_add_part1.py](07_add_part1.py) | `real_splits.csv` của V1 + `review.csv` của part1 → `dataset_v1/real_splits_multi_001.csv`. Chỉ đọc split V1 đã khóa; V1 vào train, người của part1 chia train/val/test, hai người chung kênh nằm cùng split. |
+| Generator | [Wav2Lip 00/01/02](../generators/README.md) | Có settings riêng vẫn chọn `dataset_v1`. Kiểm tra setup → lập plan cho cả train/val/test → tạo real/fake candidates. Fake chưa review bằng mắt. |
+| 06 | [06_compress.py](06_compress.py) | `candidates.csv` của run generator → mỗi clip real/fake nén CRF 23 và 32, kèm `media_pairs.csv` cho bước trích feature. |
 
 ## Điền videos.csv
 

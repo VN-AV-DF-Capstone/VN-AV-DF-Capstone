@@ -61,8 +61,21 @@ def read_pairs(manifest):
     return rows
 
 
+def reusable_cache(path, expected):
+    """A cache left by an interrupted run is reused only when every identity field matches."""
+    if not path.is_file():
+        return None
+    try:
+        cache = torch.load(path, map_location='cpu', weights_only=True)
+    except Exception:  # Truncated by the interruption.
+        return None
+    return cache if all(cache.get(key) == value for key, value in expected.items()) else None
+
+
 def extract(args):
-    if args.out.exists():
+    """Manifest runs resume in the same directory; a failed sample is logged, not hidden."""
+    if args.out.exists() and (args.video or (args.out / 'pairs.csv').exists()
+                              or not (args.out / 'started.json').is_file()):
         raise FileExistsError(f'Output already exists; choose a new run directory: {args.out}')
     if args.video:
         if not args.video.is_file():
@@ -84,41 +97,78 @@ def extract(args):
                       implementation={name: sha256(Path(__file__).parent / name)
                                       for name in ('avhubert.py', 'media.py', 'extraction.py')})
     extractor_id = hashlib.sha256(json.dumps(provenance, sort_keys=True).encode()).hexdigest()
-    args.out.mkdir(parents=True, exist_ok=False)
+    state = dict(extractor_id=extractor_id, manifest_sha256=manifest_hash)
+    if args.out.exists():
+        if json.loads((args.out / 'started.json').read_text(encoding='utf-8')) != state:
+            raise FileExistsError(f'Output was started with another extractor/manifest: {args.out}')
+        print('Resuming: matching caches are reused', flush=True)
+    else:
+        args.out.mkdir(parents=True, exist_ok=False)
+        if not args.video:
+            (args.out / 'started.json').write_text(json.dumps(state), encoding='utf-8')
     report = dict(schema='avhubert_feature_run_v1', extractor_id=extractor_id,
                   provenance=provenance, manifest_sha256=manifest_hash, samples=[])
-    output_rows = []
-    # A failed run has no pairs.csv. Do not silently skip a failed class/view.
+    output_rows, failures = [], []
     for index, row in enumerate(rows):
         print(f'[{index + 1}/{len(rows)}] {row["sample_id"]}', flush=True)
         output_row = {key: row[key] for key in ('sample_id', 'label', 'split')}
         view_specs = [('media_path', 'view_id', 'feature_path')]
         if not args.video:
             view_specs.append(('paired_media_path', 'paired_view_id', 'paired_feature_path'))
-        for media_key, view_key, feature_key in view_specs:
-            source_hash = sha256(row[media_key])
-            preview = args.out / f'{index:06d}_{feature_key}_mouth.mp4' if getattr(args, 'previews', True) else None
-            audio, video, quality = processor(row[media_key], row['start_frame'], row['num_frames'],
-                                              preview_path=preview)
-            a, v = adapter(audio.to(args.device), video.to(args.device))
-            if (a.shape[1] != row['num_frames'] or not torch.isfinite(a).all()
-                    or not torch.isfinite(v).all()):
-                raise ValueError('Extractor returned invalid features')
-            cache = dict(sample_id=row['sample_id'], label=row['label'], split=row['split'],
-                         view_id=row[view_key], extractor_id=extractor_id,
-                         timeline_id=f'25fps:{row["start_frame"]}:{row["num_frames"]}',
-                         source_sha256=source_hash, audio=a[0].cpu(), visual=v[0].cpu())
-            filename = f'{index:06d}_{feature_key}.pt'
-            torch.save(cache, args.out / filename)
-            output_row[feature_key] = filename
-            report['samples'].append(dict(sample_id=row['sample_id'], view_id=row[view_key],
-                                          source_path=str(row[media_key]), source_sha256=source_hash,
-                                          feature_path=filename, quality=quality))
+        samples = []
+        try:
+            for media_key, view_key, feature_key in view_specs:
+                filename = f'{index:06d}_{feature_key}.pt'
+                identity = dict(sample_id=row['sample_id'], label=row['label'], split=row['split'],
+                                view_id=row[view_key], extractor_id=extractor_id,
+                                timeline_id=f'25fps:{row["start_frame"]}:{row["num_frames"]}',
+                                source_sha256=sha256(row[media_key]))
+                cache = None if args.video else reusable_cache(args.out / filename, identity)
+                if cache is None:
+                    preview = (args.out / f'{index:06d}_{feature_key}_mouth.mp4'
+                               if getattr(args, 'previews', True) else None)
+                    if preview is not None:
+                        for old in (preview, preview.with_suffix('.png')):
+                            old.unlink(missing_ok=True)  # Left by an interrupted attempt.
+                    audio, video, quality = processor(row[media_key], row['start_frame'], row['num_frames'],
+                                                      preview_path=preview)
+                    a, v = adapter(audio.to(args.device), video.to(args.device))
+                    if (a.shape[1] != row['num_frames'] or not torch.isfinite(a).all()
+                            or not torch.isfinite(v).all()):
+                        raise ValueError('Extractor returned invalid features')
+                    cache = dict(identity, audio=a[0].cpu(), visual=v[0].cpu(), quality=json.dumps(quality))
+                    partial = args.out / (filename + '.partial')
+                    torch.save(cache, partial)
+                    partial.replace(args.out / filename)
+                output_row[feature_key] = filename
+                samples.append(dict(sample_id=row['sample_id'], view_id=row[view_key],
+                                    source_path=str(row[media_key]), source_sha256=identity['source_sha256'],
+                                    feature_path=filename, quality=json.loads(cache['quality'])))
+        except Exception as exc:  # One unusable clip must not discard hours of extraction.
+            if args.video:
+                raise
+            failures.append(dict(sample_id=row['sample_id'], label=row['label'], split=row['split'],
+                                 error=f'{type(exc).__name__}: {exc}'))
+            print(f'FAILED: {failures[-1]["error"]}', flush=True)
+            continue
+        report['samples'].extend(samples)
         output_rows.append(output_row)
+    report['failures'] = failures
+    if failures:
+        with (args.out / 'failures.csv').open('w', newline='', encoding='utf-8') as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(failures[0]))
+            writer.writeheader()
+            writer.writerows(failures)
+        print(f'{len(failures)} samples failed; see {args.out / "failures.csv"}', flush=True)
+    if not output_rows:
+        raise ValueError('Every sample failed; no pairs.csv written')
     (args.out / 'run.json').write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding='utf-8')
     if not args.video:
         with (args.out / 'pairs.csv').open('w', newline='', encoding='utf-8') as handle:
             writer = csv.DictWriter(handle, fieldnames=list(output_rows[0]))
             writer.writeheader()
             writer.writerows(output_rows)
+        for split in ('train', 'val', 'test'):
+            labels = [r['label'] for r in output_rows if r['split'] == split]
+            print(f'{split}: {labels.count(0)} real, {labels.count(1)} fake', flush=True)
     print(f'Completed: {args.out}', flush=True)

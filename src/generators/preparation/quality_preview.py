@@ -44,7 +44,7 @@ def prepare(run):
     from src.features.media import decode_window, run_media_command
     rows = read_rows(settings.MANIFEST)
     pool = wav2lip.select_plan(rows, min(100, sum(r['split'] == 'train' and
-        float(r['duration']) >= 2.2 for r in rows)), FRAMES, run.name)
+        float(r['duration']) >= 2.2 for r in rows)), FRAMES, run.name, splits=('train',))
     index = wav2lip.validate_plan(pool, rows)
     selected, rejected, sizes = [], [], {}
     for item in pool:

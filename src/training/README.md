@@ -14,12 +14,14 @@ còn lại. Đây là kiểm tra metadata, không tự chứng minh data không 
 
 Chạy từ root repo SAU KHI có split và feature thật:
 
-`src/features/01_extract.py` tạo `pairs.csv` theo đúng schema này. Hướng dẫn chuẩn bị checkpoint/media ở [features](../features/README.md). Các đường dẫn ví dụ dưới đây dùng output mặc định `extract_001`.
+`src/features/01_extract.py` tạo `pairs.csv` theo đúng schema này. Hướng dẫn chuẩn bị checkpoint/media ở [features](../features/README.md). Các đường dẫn ví dụ dưới đây dùng output mặc định của 01_extract.
 
 ```powershell
-python src/training/01_train.py --manifest cache/features/dataset_v1/extract_001/pairs.csv --out experiments/y_001 --consistency-weight 0
-python src/training/01_train.py --manifest cache/features/dataset_v1/extract_001/pairs.csv --out experiments/x_001 --consistency-weight 1
+python src/training/01_train.py --manifest cache/features/dataset_v1/wav2lip_multi_001_crf23_32/pairs.csv --out experiments/y_001 --epochs 30 --consistency-weight 0
+python src/training/01_train.py --manifest cache/features/dataset_v1/wav2lip_multi_001_crf23_32/pairs.csv --out experiments/x_001 --epochs 30 --consistency-weight 1
 ```
+
+Sau đó chấm điểm bằng `python src/evaluation/01_evaluate.py --run experiments/y_001`.
 
 Trọng số 1 chỉ là ví dụ. Cùng seed/dữ liệu/batch/epoch cho X và Y. Chương trình
 không đọc feature test; chọn checkpoint bằng supervised loss validation cho cả
