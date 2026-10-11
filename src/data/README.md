@@ -58,7 +58,19 @@ Kiểm tra giấy phép là bước riêng tùy chọn theo yêu cầu hiện t�
 
 ## Cắt và gộp
 
-`python src/data/preparation/cut_clips.py --config <config.json>` dùng cutter đã giữ lại; xem `--help`. Input CSV cần filename, số dòng khớp expected_input_count. Bật GPU chỉ sau khi kiểm tra môi trường. Bước VAD/YOLO có dependency/model ngoài, chưa smoke full nguồn mới.
+`python src/data/preparation/cut_clips.py --config <config.json>` dùng cutter đã giữ lại; xem `--help`. Input CSV cần filename, số dòng khớp expected_input_count. Bật GPU chỉ sau khi kiểm tra môi trường. Bước VAD/YOLO đã được thử trên một batch V2 nhỏ, chưa chạy hết nguồn mới.
+
+### Xem bản nhẹ rồi mới xuất master
+
+Với batch tải đã hoàn tất, đặt `PREVIEW_HEIGHT = 480` trong `03_cut_clips.py` rồi chạy file; preview sẽ nằm trong `.tmp/clip_previews/`. Với một batch con tự chọn, tạo config giống bước 03 nhưng đặt `preview_height: 480` và `output_root` vào thư mục tạm riêng (ví dụ `.tmp/v2_preview_batches`), rồi chạy `python -m src.data.preparation.cut_clips --config <preview-config.json>`. Bộ lọc VAD/khuôn mặt/cảnh vẫn chạy như cũ; clip được mã hóa ở 480p, CRF 30 và AAC 64k. Batch này ghi `preview_candidates.csv` và `review_decisions_template.csv`, **không** ghi `accepted_clips.csv`, nên bước 04 không nhầm bản xem thử với master.
+
+Xem/nghe từng preview, sao chép template thành CSV mới, điền `decision=keep` hoặc `reject` cho **mọi** `clip_id`. Sau đó chạy:
+
+```text
+python -m src.data.preparation.export_reviewed_clips --preview-batch <thu-muc-batch-preview> --decisions <review_decisions.csv> --source-dir <thu-muc-video-goc> --output-root <data/real/dataset_v2> --run-id <run-moi>
+```
+
+Lệnh xuất lại chỉ các dòng `keep` từ video gốc bằng cấu hình master hiện tại (giữ độ phân giải nguồn, x264 CRF 18, AAC 128k); output mới có `accepted_clips.csv` để bước 04 dùng. Chỉ cần chuyển video gốc của các clip được chọn sang máy xuất master. Lệnh từ chối review thiếu dòng, `clip_id` lạ/trùng, decision trống hoặc output đã tồn tại. Giữ `preview_candidates.csv`, CSV quyết định và video gốc cho đến khi kiểm tra master xong. Chế độ thường của `03_cut_clips.py` vẫn xuất master trực tiếp.
 
 `python src/data/preparation/build_manifest.py --add podcast "<batch>/**/accepted_clips.csv" <media-root> --out <clips.csv>` gộp accepted manifests và kiểm tra 1:1 clip/media. Có thể truyền nhiều `--add`. Kết quả chưa phải đã được review hay đã có speaker_id.
 

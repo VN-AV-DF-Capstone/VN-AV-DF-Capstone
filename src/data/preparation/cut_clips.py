@@ -73,6 +73,10 @@ class CutConfig:
     nvenc_preset: str = "p4"
     x264_crf: int = 18
     x264_preset: str = "veryfast"
+    preview_height: int = 0
+    preview_x264_crf: int = 30
+    preview_nvenc_cq: int = 32
+    preview_audio_bitrate: str = "64k"
     yolo_batch: int = 256
     sample_fps: float = 1.0
     frame_size: int = 320
@@ -106,6 +110,10 @@ class CutConfig:
             raise ValueError("expected_input_count phải khớp danh sách video đã chọn")
         if self.num_workers < 1:
             raise ValueError("num_workers phải >= 1")
+        if self.preview_height and (self.preview_height < 144 or self.preview_height % 2):
+            raise ValueError("preview_height phải là số chẵn >= 144, hoặc 0 để xuất bản đầy đủ")
+        if not 0 <= self.preview_x264_crf <= 51:
+            raise ValueError("preview_x264_crf phải trong khoảng 0..51")
 
 
 @dataclass
@@ -257,25 +265,28 @@ def cut_clip_with_fallback(
         raise FileExistsError(f"Từ chối ghi đè clip đã publish: {clip_path}")
     attempts = []
     backends = ["nvenc", "libx264"] if config.use_nvenc else ["libx264"]
+    preview = config.preview_height > 0
+    video_filter = ["-vf", f"scale=-2:{config.preview_height}"] if preview else []
+    audio_bitrate = config.preview_audio_bitrate if preview else config.audio_bitrate
     for backend in backends:
         _unlink_own_partial(partial)
         if backend == "nvenc":
             hw = ["-hwaccel", "cuda", "-hwaccel_device", str(gpu_id)]
             codec = [
                 "-c:v", "h264_nvenc", "-preset", config.nvenc_preset,
-                "-rc", "vbr", "-cq", str(config.nvenc_cq),
+                "-rc", "vbr", "-cq", str(config.preview_nvenc_cq if preview else config.nvenc_cq),
                 "-gpu", str(gpu_id), "-pix_fmt", "yuv420p",
             ]
         else:
             hw = ["-threads", "2"]
             codec = [
-                "-c:v", "libx264", "-crf", str(config.x264_crf),
+                "-c:v", "libx264", "-crf", str(config.preview_x264_crf if preview else config.x264_crf),
                 "-preset", config.x264_preset, "-pix_fmt", "yuv420p",
             ]
         command = [
             "ffmpeg", "-y", *hw, "-ss", f"{start_sec:.6f}",
             "-i", str(video_path), "-t", f"{end_sec - start_sec:.6f}",
-            *codec, "-c:a", "aac", "-b:a", config.audio_bitrate,
+            *codec, *video_filter, "-c:a", "aac", "-b:a", audio_bitrate,
             "-movflags", "+faststart", "-loglevel", "error", str(partial),
         ]
         result = runner(command)
@@ -581,9 +592,9 @@ def process_one_video(filename):
                 accepted.append({
                     "clip_id": clip_id,
                     "source_video": video_id,
-                    "start_time": round(start, 3),
-                    "end_time": round(end, 3),
-                    "duration": round(end - start, 3),
+                    "start_time": round(start, 6) if config.preview_height else round(start, 3),
+                    "end_time": round(end, 6) if config.preview_height else round(end, 3),
+                    "duration": round(end - start, 6) if config.preview_height else round(end - start, 3),
                     "face_ratio": round(face_ratio, 3),
                     "speech_ratio": round(speech_ratio, 3),
                     "snr": round(snr, 2),
@@ -810,14 +821,24 @@ def run_batch(config):
         accepted,
         media_paths,
     )
-    for path in media_paths:
-        valid, detail = probe_media(path)
-        if not valid:
-            raise ValueError(f"media contract fail {path}: {detail}")
+    # cut_clip_with_fallback already probed each accepted clip before publishing it.
 
-    _write_csv_atomic(
-        batch_dir / "accepted_clips.csv", accepted, ACCEPTED_FIELDS
-    )
+    if config.preview_height:
+        _write_csv_atomic(batch_dir / "preview_candidates.csv", accepted, ACCEPTED_FIELDS)
+        _write_csv_atomic(
+            batch_dir / "review_decisions_template.csv",
+            [
+                {
+                    "clip_id": row["clip_id"], "decision": "",
+                    "source_video": row["source_video"],
+                    "start_time": row["start_time"], "end_time": row["end_time"],
+                }
+                for row in accepted
+            ],
+            ["clip_id", "decision", "source_video", "start_time", "end_time"],
+        )
+    else:
+        _write_csv_atomic(batch_dir / "accepted_clips.csv", accepted, ACCEPTED_FIELDS)
     _write_csv_atomic(
         batch_dir / "rejected_windows.csv", rejected, REJECT_FIELDS
     )
@@ -826,6 +847,8 @@ def run_batch(config):
     )
     summary = {
         "schema": "cut_clips_run_v1",
+        "output_mode": "preview" if config.preview_height else "full",
+        "review_required": bool(config.preview_height),
         "run_id": config.run_id,
         "tier": config.tier,
         "input_total_tier": len(all_input),
@@ -866,7 +889,7 @@ def run_batch(config):
         archive_base = str(batch_dir / f"{config.tier}_{config.start_index}_{end}_media")
         shutil.make_archive(archive_base, "zip", media_dir)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
-    print(f"Output bất biến: {batch_dir}")
+    print(f"Batch output: {batch_dir}")
     return batch_dir
 
 

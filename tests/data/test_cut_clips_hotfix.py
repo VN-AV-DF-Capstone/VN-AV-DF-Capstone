@@ -175,6 +175,33 @@ class CutClipsHotfixTest(unittest.TestCase):
             self.assertFalse(target.exists())
             self.assertEqual(list(Path(tmp).glob("*.partial.mp4")), [])
 
+    def test_preview_uses_small_encode_profile_without_changing_full_default(self):
+        commands = []
+        with tempfile.TemporaryDirectory() as tmp:
+            for height, name in ((480, "preview.mp4"), (0, "master.mp4")):
+                def runner(command):
+                    commands.append(command)
+                    Path(command[-1]).write_bytes(b"valid")
+                    return result()
+
+                cut = CORE.cut_clip_with_fallback(
+                    "source.mp4", Path(tmp) / name, 1.0, 4.0, 0,
+                    config(use_nvenc=False, preview_height=height),
+                    runner=runner, validator=lambda _path: (True, ""),
+                )
+                self.assertTrue(cut.ok)
+        preview, master = commands
+        self.assertEqual(preview[preview.index("-vf") + 1], "scale=-2:480")
+        self.assertEqual(preview[preview.index("-crf") + 1], "30")
+        self.assertEqual(preview[preview.index("-b:a") + 1], "64k")
+        self.assertNotIn("-vf", master)
+        self.assertEqual(master[master.index("-crf") + 1], "18")
+        self.assertEqual(master[master.index("-b:a") + 1], "128k")
+
+    def test_preview_height_must_be_even(self):
+        with self.assertRaisesRegex(ValueError, "preview_height"):
+            config(preview_height=481).validate()
+
     def test_batch_coverage_requires_exact_input_status_and_media(self):
         with tempfile.TemporaryDirectory() as tmp:
             media = Path(tmp) / "clip.mp4"
