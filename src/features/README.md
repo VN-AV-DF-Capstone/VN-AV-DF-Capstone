@@ -104,7 +104,7 @@ Audio/visual trong cache của `01_extract.py` chính là đầu ra hai nhánh m
 - Transformer được viết lại bằng PyTorch thuần theo `TransformerEncoder` wav2vec2 của Fairseq, không cần cài Fairseq. Nạp strict: thiếu, thừa key hay sai shape đều lỗi. Chỉ bỏ qua hai nhánh và các head dùng cho pretraining (`mask_emb`, `label_embs_concat`, `final_proj`).
 - Test so từng lớp với Conv1d weight-norm và `TransformerEncoderLayer` của PyTorch trên weights giả lập. Chưa so trực tiếp với Fairseq gốc.
 
-Sau khi chạy, chương trình in độ tương đồng cosine giữa đặc trưng chỉ-hình ở frame t và chỉ-tiếng ở frame t+k (k từ −5 đến 5), trung bình theo view, riêng real và fake. Nếu Transformer được nạp đúng, hàng real phải cao nhất ở k=0. Nếu không, dừng lại trước khi train. Đây là kiểm tra hợp lý, không chứng minh AV-HuBERT (huấn luyện bằng tiếng Anh) hoạt động tốt với tiếng Việt.
+Sau khi chạy, chương trình in độ tương đồng cosine giữa đặc trưng chỉ-hình ở frame t và chỉ-tiếng ở frame t+k (k từ −5 đến 5), trung bình theo view, riêng real và fake. Nếu Transformer được nạp đúng, hàng real có đỉnh rõ gần k=0; lệch một, hai frame là độ lệch tiếng–hình sẵn có của bản ghi (lần chạy 11/10: real đạt đỉnh ở k=+1, cosine 0,233; fake Wav2Lip ở k=+2, 0,172; xem `experiments/av_offset/`). Không có đỉnh rõ thì dừng lại trước khi train. Đây là kiểm tra hợp lý, không chứng minh AV-HuBERT (huấn luyện bằng tiếng Anh) hoạt động tốt với tiếng Việt.
 
 ```powershell
 python src/features/02_fuse.py

@@ -4,7 +4,7 @@ Cập nhật 12/10/2026; kết quả 09–11/10/2026 ở [báo cáo Wav2Lip](doc
 
 ## Đã chuyển đổi
 
-- Đợt chuyển đổi làm trên nhánh `codex/research-reset`; từ 09/10/2026 công việc tiếp tục trên `claude/project-thread-qetcz4`, nhánh này chứa toàn bộ `codex/research-reset`. Giữ lịch sử Git và thay đổi trước dọn trong archive/backup.
+- Nhánh làm việc: `main`. Đợt chuyển đổi làm trên nhánh `codex/research-reset`, sau đó tiếp tục trên `claude/project-thread-qetcz4`; ngày 12/10/2026 nhánh này được fast-forward vào `main`, nên `main` chứa toàn bộ `codex/research-reset`. Giữ lịch sử Git và thay đổi trước dọn trong archive/backup.
 - Media, cache và population cũ đã được đưa ra khỏi workspace sau đối chiếu backup. Dữ liệu V1 đã được thu thập, cắt và review xong (18/09/2026).
 - Báo cáo, metadata và bằng chứng AVSP-Net cũ ở [legacy_avsp](docs/archives/legacy_avsp/README.md). Số đo cũ không áp dụng cho hướng mới.
 - Công cụ cắt/review/quality được giữ, cập nhật đường dẫn. Preview không còn import bộ feature AVSP-Net.
