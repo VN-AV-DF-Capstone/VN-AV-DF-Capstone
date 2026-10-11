@@ -12,4 +12,6 @@ Có thêm `predict.py`: hàm predict_batch nhận model và feature audio/visual
 
 `04_check_av_offset.py --out experiments/av_offset/<ten>.csv` ước lượng độ lệch tiếng–hình của từng clip từ đặc trưng AV-HuBERT đầy đủ (`02_fuse.py`), không dùng model đã train. Độ lệch k nghĩa là hình ở frame t khớp nhất với tiếng ở frame t+k (40 ms mỗi frame). Bảng in trung vị theo từng video nguồn, tách real và fake, để thấy video nào có clip real bị lệch tiếng. Đây là chẩn đoán dữ liệu: nếu đặt quy tắc lọc theo độ lệch, quy tắc phải cố định cho mọi split và loại cả real lẫn fake của cùng nguồn; không chọn clip theo điểm detector hay kết quả test.
 
+`05_evaluate_peak_sync.py --out experiments/peak_sync_001` chấm bằng điểm không cần train: độ giống cao nhất giữa hình ở frame t và tiếng ở frame t+k của đặc trưng AV-HuBERT đầy đủ, với |k| ≤ `--max-offset` (mặc định 15). Điểm fake là số âm của độ giống đó, nên độ lệch đều của bản ghi không bị phạt. Báo cáo giống hệt 03 (ngưỡng EER của val, hình real ghép tiếng real khác) vì cả hai dùng chung `sync_report.py`. Độ giống thấp ở fake có thể một phần do generator làm mờ miệng, không thuần do sai khẩu hình.
+
 Ngưỡng được chọn trên validation và giữ cố định khi đánh giá final test. Dự đoán, chỉ số và cấu hình đánh giá nằm trong `experiments/<run_id>/`, không trong source. Không dùng chẩn đoán metadata làm kết quả của detector chính.

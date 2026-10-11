@@ -12,7 +12,7 @@
 | [features/](features/README.md) | Chuẩn bị audio/vùng miệng, trích đặc trưng cho model | 01_extract: loader Base pre-fusion, preprocessing, cache cho training; đã chạy một clip thật với pretrained/landmark thật. 02_fuse: thêm Transformer hợp nhất lên cache có sẵn |
 | [models/](models/README.md) | Detector nhận audio/visual features | Có detector.py, alignment.py (căn chỉnh tiếng–môi) và 01_smoke_test.py |
 | [training/](training/README.md) | Học nhãn và consistency cho X/Y | Loader paired features, train/validation theo epoch, best checkpoint; 02_train_alignment chỉ học trên real; kiểm chứng giả lập |
-| [evaluation/](evaluation/README.md) | Dự đoán và đánh giá | 01_evaluate: AUC/EER/accuracy theo split và mức nén; 02_check_cues: bỏ modality và ghép tiếng lệch; 03_evaluate_alignment cho model căn chỉnh; 04_check_av_offset: độ lệch tiếng–hình từng clip; check_shortcuts.py |
+| [evaluation/](evaluation/README.md) | Dự đoán và đánh giá | 01_evaluate: AUC/EER/accuracy theo split và mức nén; 02_check_cues: bỏ modality và ghép tiếng lệch; 03_evaluate_alignment cho model căn chỉnh; 04_check_av_offset: độ lệch tiếng–hình từng clip; 05_evaluate_peak_sync: điểm không cần train; check_shortcuts.py |
 
 Luồng: dữ liệu đã chia split → tạo fake → tạo các bản nén → chuẩn bị audio/visual → train detector → đánh giá. Các bước đã nối với nhau bằng đường dẫn mặc định (bảng dưới) và mới chạy thử bằng media tổng hợp; chưa chạy trên dữ liệu thật, chưa có fake đã duyệt hay kết quả detector.
 
@@ -32,8 +32,9 @@ Chạy từ root repo bằng `vn_av_df`, theo thứ tự. Bước 2–4 chạy l
 | 8 | `python src/features/02_fuse.py` | Đặc trưng AV-HuBERT đầy đủ (chỉ tiếng, chỉ hình) ở `cache/features/dataset_v1/wav2lip_multi_001_crf23_32_fused/`; in kiểm tra độ khớp theo độ lệch frame |
 | 9 | `python src/training/02_train_alignment.py --manifest cache/features/dataset_v1/wav2lip_multi_001_crf23_32_fused/pairs.csv --out experiments/align_001` | Model căn chỉnh tiếng–môi, chỉ học từ clip real |
 | 10 | `python src/evaluation/03_evaluate_alignment.py --run experiments/align_001` | AUC/EER real so với fake Wav2Lip, và hình real ghép tiếng real khác |
+| 11 | `python src/evaluation/05_evaluate_peak_sync.py --out experiments/peak_sync_001` | Cùng bảng như bước 10 cho điểm không cần train (độ khớp tốt nhất trong ±15 frame) |
 
-Bước 8–10 không cho model thấy fake khi train, nên model không thể học vết hình riêng của Wav2Lip. Fake chỉ dùng để chọn ngưỡng trên val và đánh giá.
+Bước 8–11 không cho model thấy fake khi train, nên model không thể học vết hình riêng của Wav2Lip. Fake chỉ dùng để chọn ngưỡng trên val và đánh giá.
 
 X dùng cùng lệnh bước 5 với `--consistency-weight` lớn hơn 0 và `--out` mới. Kết quả bước 6 là kết quả sơ bộ: fake chưa review bằng mắt, val chỉ có 3 người và test 4 người. Để chạy pipeline data V2, đặt `DATASET_VERSION = 'dataset_v2'` trong `data/preparation/settings.py`; generator có cấu hình V1 riêng.
 

@@ -82,7 +82,7 @@ class AlignmentCliTest(unittest.TestCase):
                     cache = (root / f'{i}_{view}.pt',
                              dict(sample_id=f's{i}', label=label, split=split, view_id=view,
                                   extractor_id='synthetic_fixture', timeline_id='25fps:0:12',
-                                  audio=torch.randn(12, 4), visual=torch.randn(12, 6)))
+                                  audio=torch.randn(12, 6), visual=torch.randn(12, 6)))  # Fused: same width.
                     if label:
                         fakes.append(cache)
                     else:

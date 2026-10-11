@@ -19,3 +19,12 @@ def crop_to_best_offset(views, max_offset):
     offset = int(sum(offset_profile(a, v, max_offset) for a, v in views).argmax()) - max_offset
     start, end = max(offset, 0), len(views[0][0]) + min(offset, 0)
     return [(a[start:end], v[start - offset:end - offset]) for a, v in views]
+
+
+def best_offset_misalignment(audio, visual, lengths, max_offset):
+    """Training-free score per clip [B]: minus the highest offset_profile value within ±max_offset.
+
+    Higher means audio and lips agree less; a constant offset is not penalized. Padding is ignored.
+    """
+    return torch.stack([-offset_profile(a[:n], v[:n], max_offset).max()
+                        for a, v, n in zip(audio, visual, lengths.tolist())])
