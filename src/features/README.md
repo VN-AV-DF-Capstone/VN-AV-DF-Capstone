@@ -81,7 +81,7 @@ Mỗi view được xử lý riêng và lưu feature riêng. Kết quả đầy 
 4. Audio dùng log-filterbank 26 chiều, ghép mỗi 4 frame thành 104 chiều tại 25 Hz, rồi chuẩn hóa theo checkpoint. Chỉ cho lệch chiều dài tối đa một frame ở biên; không kéo giãn feature để che lỗi timeline.
 5. Nạp **đúng weights hai nhánh trước fusion**: visual ResEncoder + projection và audio projection. Đóng băng, `eval`, không gradient. Với Base, mỗi đầu ra là `[T,768]`. Thiếu/sai key weights thì lỗi, không dùng random weights thay thế.
 
-Đây là bộ trích xuất **pre-fusion**, chưa phải toàn bộ Transformer AV-HuBERT 103M. Base không có Transformer riêng trong mỗi nhánh (`sub_encoder_layers=0`), vì vậy nhánh audio ở đây chỉ là phép chiếu acoustic features; khả năng học quan hệ thời gian hiện đến từ GRU của detector. Muốn dùng Transformer hợp nhất phải thêm chế độ/thí nghiệm riêng, không được diễn giải hai nhánh này như hai encoder Transformer hoàn chỉnh.
+Đây là bộ trích xuất **pre-fusion**, chưa phải toàn bộ Transformer AV-HuBERT 103M. Base không có Transformer riêng trong mỗi nhánh (`sub_encoder_layers=0`), vì vậy nhánh audio ở đây chỉ là phép chiếu acoustic features; khả năng học quan hệ thời gian hiện đến từ GRU của detector. Transformer hợp nhất được thêm ở bước riêng `02_fuse.py` (mục 6); không diễn giải hai nhánh này như hai encoder Transformer hoàn chỉnh.
 
 `avhubert.py` phụ trách weights; `media.py` xử lý media; `extraction.py` điều phối/lưu cache; chỉ cần Run `01_extract.py`.
 
@@ -92,3 +92,20 @@ Mỗi view được xử lý riêng và lưu feature riêng. Kết quả đầy 
 Ngày 16/09/2026: đã cài dlib CPU 20.0.1, nạp predictor `.dat` và chạy **end-to-end trên một clip thật** được reviewer đánh dấu `keep`: `j60KF89vXkg_s0000138818_e0000141598`, cửa sổ 0–2 giây. Video đầu vào 1920×1080, 50 fps, audio 44,1 kHz; sau xử lý có 50 frame, 32.000 mẫu audio 16 kHz, không nội suy landmark. Audio/visual features đều có shape `[50,768]`, giá trị hữu hạn. Thời gian toàn lệnh trên CPU khoảng 34,48 giây, gồm cả nạp model; không phải benchmark throughput.
 
 Kết quả ở `cache/features/dataset_v1/real_smoke_001/`: `000000_feature_path.pt` và `run.json` lưu hash/config/quality. Cache thử giữ nhãn `None`, split `unassigned`; không tự đưa vào training. Kiểm tra kỹ thuật một clip chưa chứng minh chất lượng ROI trên toàn dataset hay accuracy detector.
+
+## 6. Thêm Transformer hợp nhất (`02_fuse.py`)
+
+Audio/visual trong cache của `01_extract.py` chính là đầu ra hai nhánh mà Transformer hợp nhất nhận vào. Vì vậy `02_fuse.py` chỉ đọc cache đã có, không đọc lại video và không chạy lại dlib.
+
+- Làm như `extract_finetune` của upstream: ghép [audio, video], LayerNorm, `post_extract_proj`, Transformer 12 lớp (LayerNorm trước mỗi khối), LayerNorm cuối, lấy lớp cuối.
+- Mỗi view có hai đặc trưng `[T,768]`: `audio` là đầu ra khi chỉ có tiếng (hình đặt 0), `visual` là đầu ra khi chỉ có hình (tiếng đặt 0). Tên file và `pairs.csv` giữ nguyên, nên các script train/đánh giá sẵn có đọc được.
+- Transformer được viết lại bằng PyTorch thuần theo `TransformerEncoder` wav2vec2 của Fairseq, không cần cài Fairseq. Nạp strict: thiếu, thừa key hay sai shape đều lỗi. Chỉ bỏ qua hai nhánh và các head dùng cho pretraining (`mask_emb`, `label_embs_concat`, `final_proj`).
+- Test so từng lớp với Conv1d weight-norm và `TransformerEncoderLayer` của PyTorch trên weights giả lập. Chưa so trực tiếp với Fairseq gốc.
+
+Sau khi chạy, chương trình in độ tương đồng cosine giữa đặc trưng chỉ-hình ở frame t và chỉ-tiếng ở frame t+k (k từ −5 đến 5), trung bình theo view, riêng real và fake. Nếu Transformer được nạp đúng, hàng real phải cao nhất ở k=0. Nếu không, dừng lại trước khi train. Đây là kiểm tra hợp lý, không chứng minh AV-HuBERT (huấn luyện bằng tiếng Anh) hoạt động tốt với tiếng Việt.
+
+```powershell
+python src/features/02_fuse.py
+```
+
+Mặc định đọc `cache/features/dataset_v1/wav2lip_multi_001_crf23_32` và ghi `cache/features/dataset_v1/wav2lip_multi_001_crf23_32_fused`. Output có sẵn không bị ghi đè; nếu bị ngắt giữa chừng, xóa thư mục output chưa có `pairs.csv` rồi chạy lại.

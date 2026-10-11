@@ -10,7 +10,6 @@ import copy
 import csv
 import hashlib
 from pathlib import Path
-import random
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -18,14 +17,11 @@ import torch
 from torch.utils.data import DataLoader
 from src.data.preparation.manifest_io import read_rows, unique_rows
 from src.evaluation.metrics import equal_error_rate, roc_auc, threshold_report
+from src.evaluation.mismatch import REAL_MANIFEST, mismatch_partners
 from src.evaluation.predict import predict_batch
 from src.models.detector import AudioVisualDetector
 from src.training.dataset import PairedFeatureDataset, collate_pairs
 from src.training.loop import run_epoch
-
-ROOT = Path(__file__).resolve().parents[2]
-# Speaker, source video and start time of each real clip (written by src/data/07_add_part1.py).
-REAL_MANIFEST = ROOT / 'data/manifests/dataset_v1/real_splits_multi_001.csv'
 
 
 def drop(batch, modality):
@@ -65,23 +61,6 @@ def retrain(config, settings, data, modality):
             best, state = loss, copy.deepcopy(model.state_dict())
     model.load_state_dict(state)
     return model
-
-
-def mismatch_partners(rows, clips, seconds, seed):
-    """Real sample_id -> another real sample of the same speaker (rows are one split) whose
-    window does not overlap in time. Samples without such a partner are left out."""
-    def window(row):
-        clip = clips[row['sample_id'].rsplit('__', 2)[0]]  # <clip_id>__<run_id>__real
-        return clip['speaker_id'], clip['source_video'], float(clip['start_time'])
-    real = sorted((row for row in rows if row['label'] == '0'), key=lambda row: row['sample_id'])
-    rng, partners = random.Random(seed), {}
-    for row in real:
-        speaker, video, start = window(row)
-        options = [other for other in real if other is not row and window(other)[0] == speaker
-                   and (window(other)[1] != video or abs(window(other)[2] - start) >= seconds)]
-        if options:
-            partners[row['sample_id']] = rng.choice(options)['sample_id']
-    return partners
 
 
 def mismatch_scores(model, dataset, partners):

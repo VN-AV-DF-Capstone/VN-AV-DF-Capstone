@@ -8,4 +8,6 @@ Có thêm `predict.py`: hàm predict_batch nhận model và feature audio/visual
 
 `02_check_cues.py --run experiments/<run_id>` kiểm tra model dựa vào dấu hiệu nào, chỉ dùng feature đã lưu: (1) train lại cùng cấu hình nhưng xóa một modality (`visual_only`, `audio_only`); (2) chấm model của run trên hình real ghép tiếng của một clip real khác cùng người, cùng split, không trùng thời gian (lệch tiếng nhưng không có vết generator). Mỗi model dùng ngưỡng EER của val. Kết quả ở `experiments/<run_id>/cue_check/`; đây là chẩn đoán, không phải kết quả chính.
 
+`03_evaluate_alignment.py --run experiments/<run_id>` đánh giá run của `src/training/02_train_alignment.py`. Điểm fake là độ lệch tiếng–môi; ngưỡng là điểm EER trên val, giữ nguyên cho test. Ngoài real so với fake, chương trình chấm hình real ghép tiếng của một clip real khác cùng người (cách ghép giống 02_check_cues, ở `mismatch.py`). Model căn chỉnh hoạt động đúng thì phải gọi phần lớn các cặp này là fake. Kết quả ở `experiments/<run_id>/evaluation/`.
+
 Ngưỡng được chọn trên validation và giữ cố định khi đánh giá final test. Dự đoán, chỉ số và cấu hình đánh giá nằm trong `experiments/<run_id>/`, không trong source. Không dùng chẩn đoán metadata làm kết quả của detector chính.

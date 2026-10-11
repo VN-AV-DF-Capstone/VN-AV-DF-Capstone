@@ -39,3 +39,11 @@ Chứa cách đọc manifest/đặc trưng thành batch, vòng lặp train, các
 Nhận split đã khóa từ luồng data; không tự chia ngẫu nhiên lại clip. X/Y dùng cùng dữ liệu, bản nén và ngân sách train. Chỉ chọn cấu hình/ngưỡng trên validation, không dùng final test để chọn model.
 
 Model được import từ `src/models/`. Log, cấu hình, kết quả validation và checkpoint ghi vào `experiments/<run_id>/`, không vào source. File chạy có số sẽ được thêm ngay trong thư mục training khi phần train được triển khai.
+
+`02_train_alignment.py` train model căn chỉnh tiếng–môi (`src/models/alignment.py`) **chỉ trên clip real**, theo ý tưởng AVH-Align. Dòng fake trong manifest không được đọc khi train; epoch được giữ là epoch có độ lệch thấp nhất trên clip real của val. Dùng với đặc trưng từ `src/features/02_fuse.py`:
+
+```powershell
+python src/training/02_train_alignment.py --manifest cache/features/dataset_v1/wav2lip_multi_001_crf23_32_fused/pairs.csv --out experiments/align_001
+```
+
+`epochs.csv` ghi độ lệch trung bình của train và val. Khi tiếng và môi không có thông tin thời gian chung, giá trị khoảng log(2K+1), khoảng 3,04 với K=10 mặc định; càng thấp càng khớp.

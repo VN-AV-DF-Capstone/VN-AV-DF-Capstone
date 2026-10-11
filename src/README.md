@@ -9,10 +9,10 @@
 | [data/](data/README.md) | Các bước chạy 01–07, settings và logic thu thập, tải, cắt, manifest, split, nén, quality | Có code |
 | [tools/review/](tools/review/README.md) | Xem/nghe clip, phân công và gộp review | Có code và file chạy có số |
 | [generators/](generators/README.md) | Tạo lip-sync fake | Wav2Lip/MuseTalk đã chạy các batch xem chất lượng trên V1; output còn chờ review, chưa nối vào dataset huấn luyện |
-| [features/](features/README.md) | Chuẩn bị audio/vùng miệng, trích đặc trưng cho model | 01_extract: loader Base pre-fusion, preprocessing, cache cho training; đã chạy một clip thật với pretrained/landmark thật |
-| [models/](models/README.md) | Detector nhận audio/visual features | Có detector.py và 01_smoke_test.py; backbone chưa có |
-| [training/](training/README.md) | Học nhãn và consistency cho X/Y | Loader paired features, train/validation theo epoch, best checkpoint; kiểm chứng giả lập |
-| [evaluation/](evaluation/README.md) | Dự đoán và đánh giá | 01_evaluate: AUC/EER/accuracy theo split và mức nén; 02_check_cues: bỏ modality và ghép tiếng lệch; check_shortcuts.py |
+| [features/](features/README.md) | Chuẩn bị audio/vùng miệng, trích đặc trưng cho model | 01_extract: loader Base pre-fusion, preprocessing, cache cho training; đã chạy một clip thật với pretrained/landmark thật. 02_fuse: thêm Transformer hợp nhất lên cache có sẵn |
+| [models/](models/README.md) | Detector nhận audio/visual features | Có detector.py, alignment.py (căn chỉnh tiếng–môi) và 01_smoke_test.py |
+| [training/](training/README.md) | Học nhãn và consistency cho X/Y | Loader paired features, train/validation theo epoch, best checkpoint; 02_train_alignment chỉ học trên real; kiểm chứng giả lập |
+| [evaluation/](evaluation/README.md) | Dự đoán và đánh giá | 01_evaluate: AUC/EER/accuracy theo split và mức nén; 02_check_cues: bỏ modality và ghép tiếng lệch; 03_evaluate_alignment cho model căn chỉnh; check_shortcuts.py |
 
 Luồng: dữ liệu đã chia split → tạo fake → tạo các bản nén → chuẩn bị audio/visual → train detector → đánh giá. Các bước đã nối với nhau bằng đường dẫn mặc định (bảng dưới) và mới chạy thử bằng media tổng hợp; chưa chạy trên dữ liệu thật, chưa có fake đã duyệt hay kết quả detector.
 
@@ -29,6 +29,11 @@ Chạy từ root repo bằng `vn_av_df`, theo thứ tự. Bước 2–4 chạy l
 | 5 | `python src/training/01_train.py --manifest cache/features/dataset_v1/wav2lip_multi_001_crf23_32/pairs.csv --out experiments/y_001 --epochs 30` | Baseline Y; `best.pt` chọn theo loss val |
 | 6 | `python src/evaluation/01_evaluate.py --run experiments/y_001` | AUC, EER, accuracy theo split và mức nén; ngưỡng chọn trên val |
 | 7 | `python src/evaluation/02_check_cues.py --run experiments/y_001` | Train lại chỉ hình/chỉ tiếng và chấm hình real ghép tiếng real khác cùng người: model bắt vết generator hay độ khớp môi |
+| 8 | `python src/features/02_fuse.py` | Đặc trưng AV-HuBERT đầy đủ (chỉ tiếng, chỉ hình) ở `cache/features/dataset_v1/wav2lip_multi_001_crf23_32_fused/`; in kiểm tra độ khớp theo độ lệch frame |
+| 9 | `python src/training/02_train_alignment.py --manifest cache/features/dataset_v1/wav2lip_multi_001_crf23_32_fused/pairs.csv --out experiments/align_001` | Model căn chỉnh tiếng–môi, chỉ học từ clip real |
+| 10 | `python src/evaluation/03_evaluate_alignment.py --run experiments/align_001` | AUC/EER real so với fake Wav2Lip, và hình real ghép tiếng real khác |
+
+Bước 8–10 không cho model thấy fake khi train, nên model không thể học vết hình riêng của Wav2Lip. Fake chỉ dùng để chọn ngưỡng trên val và đánh giá.
 
 X dùng cùng lệnh bước 5 với `--consistency-weight` lớn hơn 0 và `--out` mới. Kết quả bước 6 là kết quả sơ bộ: fake chưa review bằng mắt, val chỉ có 3 người và test 4 người. Để chạy pipeline data V2, đặt `DATASET_VERSION = 'dataset_v2'` trong `data/preparation/settings.py`; generator có cấu hình V1 riêng.
 

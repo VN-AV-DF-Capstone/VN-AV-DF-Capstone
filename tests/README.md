@@ -6,7 +6,7 @@
 | `quality/` | Face/curation, active-speaker, LASER, gộp điểm và calibration. |
 | `review/` | Giao diện review, chia/gộp công việc, ROI preview. |
 | `generators/` | Chọn source/audio cho cả ba split, chống vượt split và trùng thời gian, chạy tiếp sau lỗi, output bất biến, FFmpeg real/fake bằng model stub; MuseTalk kiểm tra resume/checksum tải, 5 đầu vào 2 giây và thứ tự các cột so sánh bằng media tổng hợp. Không kiểm chứng chất lượng generator thật. |
-| `models/` | Hai luồng có gradient, padding, supervision X/Y; nạp checkpoint giả lập, preprocessing và giữ độ lệch timestamp bằng media tổng hợp. Cần PyTorch, python_speech_features; media tests dùng FFmpeg. |
+| `models/` | Hai luồng có gradient, padding, supervision X/Y; nạp checkpoint giả lập, preprocessing và giữ độ lệch timestamp bằng media tổng hợp. Transformer hợp nhất so với lớp tương đương của PyTorch, nạp strict và chuyển cache; model căn chỉnh (padding, chỉ đọc real khi train), CLI train/đánh giá. Cần PyTorch, python_speech_features; media tests dùng FFmpeg. |
 | `evaluation/` | Định nghĩa AUC/EER/ngưỡng, CLI đánh giá và kiểm tra dấu hiệu (bỏ modality, ghép tiếng real khác cùng người) trên feature giả lập. |
 
 Chạy tất cả từ root: `python -m unittest discover -s tests -q`.
