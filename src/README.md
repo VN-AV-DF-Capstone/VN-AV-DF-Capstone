@@ -30,8 +30,8 @@ Chạy từ root repo bằng `vn_av_df`, theo thứ tự. Bước 2–4 chạy l
 | 6 | `python src/evaluation/01_evaluate.py --run experiments/y_001` | AUC, EER, accuracy theo split và mức nén; ngưỡng chọn trên val |
 | 7 | `python src/evaluation/02_check_cues.py --run experiments/y_001` | Train lại chỉ hình/chỉ tiếng và chấm hình real ghép tiếng real khác cùng người: model bắt vết generator hay độ khớp môi |
 | 8 | `python src/features/02_fuse.py` | Đặc trưng AV-HuBERT đầy đủ (chỉ tiếng, chỉ hình) ở `cache/features/dataset_v1/wav2lip_multi_001_crf23_32_fused/`; in kiểm tra độ khớp theo độ lệch frame |
-| 9 | `python src/training/02_train_alignment.py --manifest cache/features/dataset_v1/wav2lip_multi_001_crf23_32_fused/pairs.csv --out experiments/align_001` | Model căn chỉnh tiếng–môi, chỉ học từ clip real |
-| 10 | `python src/evaluation/03_evaluate_alignment.py --run experiments/align_001` | AUC/EER real so với fake Wav2Lip, và hình real ghép tiếng real khác |
+| 9 | `python src/training/02_train_alignment.py --manifest cache/features/dataset_v1/wav2lip_multi_001_crf23_32_fused/pairs.csv --out experiments/align_002 --resync 5` | Model căn chỉnh tiếng–môi, chỉ học từ clip real; mỗi clip được căn về độ lệch tiếng–hình tốt nhất của nó trước khi train |
+| 10 | `python src/evaluation/03_evaluate_alignment.py --run experiments/align_002` | AUC/EER real so với fake Wav2Lip, và hình real ghép tiếng real khác |
 | 11 | `python src/evaluation/05_evaluate_peak_sync.py --out experiments/peak_sync_001` | Cùng bảng như bước 10 cho điểm không cần train (độ khớp tốt nhất trong ±15 frame) |
 
 Bước 8–11 không cho model thấy fake khi train, nên model không thể học vết hình riêng của Wav2Lip. Fake chỉ dùng để chọn ngưỡng trên val và đánh giá.

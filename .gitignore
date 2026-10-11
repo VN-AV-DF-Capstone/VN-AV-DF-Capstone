@@ -43,6 +43,8 @@ weights/**
 /data/*
 !/data/README.md
 experiments/**/checkpoints/
+# Person 2's reviewed part1 clips are data like /data/ (path used by src/data/07_add_part1.py).
+/vn-av-df-data-part1/
 experiments/**/*.log
 
 # Docs/configs/code and selected small experiment results are tracked normally.

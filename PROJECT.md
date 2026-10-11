@@ -1,6 +1,6 @@
 # PROJECT.md — trạng thái hiện hành
 
-Cập nhật 23/09/2026. Hướng hiện hành: **lip-sync audio–visual tiếng Việt**, so X/Y trên protocol tách người/nguồn, generator chưa thấy và nén. Giai đoạn sơ bộ `dataset_v1` chỉ có một người: dùng `source_disjoint_single_speaker` để chia theo nguồn; bổ sung người cho đánh giá speaker-disjoint sau. Nguồn mở rộng đang được thu thập riêng ở `dataset_v2`.
+Cập nhật 23/09/2026; kết quả 09–11/10/2026 ở [báo cáo Wav2Lip](docs/reports/2026-10-11_WAV2LIP_SYNC_RESULTS.md). Hướng hiện hành: **lip-sync audio–visual tiếng Việt**, so X/Y trên protocol tách người/nguồn, generator chưa thấy và nén. Giai đoạn sơ bộ `dataset_v1` chỉ có một người: dùng `source_disjoint_single_speaker` để chia theo nguồn; bổ sung người cho đánh giá speaker-disjoint sau. Nguồn mở rộng đang được thu thập riêng ở `dataset_v2`.
 
 ## Đã chuyển đổi
 
@@ -10,7 +10,7 @@ Cập nhật 23/09/2026. Hướng hiện hành: **lip-sync audio–visual tiến
 - Công cụ cắt/review/quality được giữ, cập nhật đường dẫn. Preview không còn import bộ feature AVSP-Net.
 - Split real theo nhóm người/nguồn được tách riêng, bỏ điều kiện đủ bốn fake. Có kiểm tra nguồn audio và generator giữ riêng cho biến thể.
 - Nén dùng media primitives được giữ lại, CLI mới dùng output bất biến, CRF tường minh, nhãn/split/provenance và log lỗi.
-- Đã tạo generators/features và bản detector/train_step/predict tối thiểu. Kiểm tra bằng tensor giả lập, chưa tích hợp generator/backbone/dataset thật; xem [src/README.md](src/README.md).
+- Đã tạo generators/features và bản detector/train_step/predict tối thiểu. Từ 09/10/2026 đã chạy với Wav2Lip, AV-HuBERT và dữ liệu thật; xem [src/README.md](src/README.md).
 
 ## Bảng tiến trình
 
@@ -23,8 +23,8 @@ Cập nhật 23/09/2026. Hướng hiện hành: **lip-sync audio–visual tiến
 | Active-speaker / gom người tự động | Công cụ tùy chọn được giữ; chưa chạy lại model ngoài hoặc calibrate ngưỡng cho population mới. |
 | Nén real/fake | Có CLI và smoke bằng media tổng hợp, không phải kết quả nghiên cứu. |
 | Generator Wav2Lip/MuseTalk/ứng viên giữ riêng | MuseTalk 1.5 đã cài đủ và chạy xong smoke 5 clip. Bước 07 đã chạy `quality_10x2s_002`: 10 clip train × 2 giây, 1080p, chung frame/audio cho Wav2Lip GAN và MuseTalk; đủ 20 fake và 10 comparison, chờ review. Preprocessing vẫn inline; S3FD dùng ảnh nhỏ, tắt benchmark và giải phóng cache GPU thừa; ghép mềm vùng dưới mặt. 19 kiểm tra generator qua; chưa phải kết quả detector hay bằng chứng fake đủ tinh vi. Generator giữ riêng chưa tích hợp. |
-| AV-HuBERT | Có 01_extract: loader Base pre-fusion, xử lý miệng/audio cùng timeline và xuất cache/pairs.csv. Đã cài dlib CPU 20.0.1, nạp checkpoint và chạy một clip thật: cửa sổ 2 giây, 50 frame, không nội suy landmark, hai feature [50,768] hữu hạn. Kết quả ở cache/features/dataset_v1/real_smoke_001. Chưa benchmark toàn bộ dữ liệu; 01_extract không dùng Transformer hợp nhất. 02_fuse thêm Transformer hợp nhất lên cache đã có; mới kiểm tra bằng weights giả lập. |
-| Detector Y và cải tiến X | Có detector, loader feature pairs, train/validation theo epoch và lưu checkpoint; X thêm consistency. Chỉ kiểm chứng bằng feature giả lập, chưa train nghiên cứu. |
+| AV-HuBERT | Có 01_extract: loader Base pre-fusion, xử lý miệng/audio cùng timeline và xuất cache/pairs.csv. Đã cài dlib CPU 20.0.1, nạp checkpoint và chạy một clip thật: cửa sổ 2 giây, 50 frame, không nội suy landmark, hai feature [50,768] hữu hạn. Kết quả ở cache/features/dataset_v1/real_smoke_001. Đã trích 1.843 dòng của run `wav2lip_multi_001` (09–11/10/2026). 01_extract không dùng Transformer hợp nhất; 02_fuse thêm Transformer hợp nhất lên cache đó, đã nạp checkpoint thật. |
+| Detector Y và cải tiến X | Có detector, loader feature pairs, train/validation theo epoch và lưu checkpoint; X thêm consistency. Y (`y_001`) đã train trên Wav2Lip nhưng bắt vết mờ của generator; hướng chính hiện tại là điểm khớp tiếng–môi (model căn chỉnh và điểm không cần train), xem báo cáo 11/10. X chưa chạy. |
 | Final test và demo detector | Chưa thực hiện. |
 | Nguồn mở rộng `dataset_v2` | Máy kiểm kê đang đặt `src/data/preparation/settings.py` thành `dataset_v2` (thay đổi local chưa commit); `data/sources/dataset_v2/selected_videos.csv` và `data/raw/dataset_v2/download_001/` đã có. Ngày 23/09: 1.954 nguồn đã chọn, 186 downloaded, 475 failed, 1.293 pending theo `download_results.csv`; chưa cắt/review/chia split V2. Đây là ảnh chụp trạng thái khi audit, không phải tổng kết đợt tải. |
 
@@ -41,7 +41,7 @@ Cập nhật 23/09/2026. Hướng hiện hành: **lip-sync audio–visual tiến
 
 URL video/playlist đã chọn → 01 thu thập danh sách → 02 tải → 03 cắt clip → 04 gộp manifest → các bước review + xác định người/nguồn → 05 chia split. Các file chạy có số ở src/data và src/tools/review; để chạy V2, đặt `DATASET_VERSION = 'dataset_v2'` trong `src/data/preparation/settings.py`. Máy kiểm kê đã đặt như vậy nhưng thay đổi này chưa commit. `dataset_v1` vẫn giữ manifest, clip và các run thử của giai đoạn sơ bộ. Generator Wav2Lip/MuseTalk có cấu hình riêng vẫn trỏ `dataset_v1`; không tự chuyển theo settings của pipeline data. Kiểm tra giấy phép tách riêng, hiện không chặn download.
 
-`src/data/preparation/compress.py` nhận master đã có nhãn/split để tạo bản nén. Từ 09/10/2026 có luồng nối sẵn V1 + part1 → Wav2Lip cả ba split → nén → feature → train → đánh giá (bảng lệnh ở [src/README.md](src/README.md)); mới kiểm tra bằng media tổng hợp, chưa chạy trên dữ liệu thật. Tất cả lệnh phải nhận dataset/đường dẫn mới, không lấy manifest từ archive làm mặc định.
+`src/data/preparation/compress.py` nhận master đã có nhãn/split để tạo bản nén. Từ 09/10/2026 có luồng nối sẵn V1 + part1 → Wav2Lip cả ba split → nén → feature → train → đánh giá (bảng lệnh ở [src/README.md](src/README.md)); đã chạy trên dữ liệu thật 09–11/10/2026 ([báo cáo](docs/reports/2026-10-11_WAV2LIP_SYNC_RESULTS.md)). Tất cả lệnh phải nhận dataset/đường dẫn mới, không lấy manifest từ archive làm mặc định.
 
 Hướng dẫn: [src/data/README.md](src/data/README.md), [review](src/tools/README.md), [DATA_PROTOCOL](docs/research/DATA_PROTOCOL.md).
 
@@ -54,9 +54,8 @@ Hướng dẫn: [src/data/README.md](src/data/README.md), [review](src/tools/REA
 
 ## Việc kế tiếp
 
-1. Review đã hoàn tất. Người dùng xác nhận mọi video cùng một người; bước 05 được cấu hình chia theo nguồn cho kết quả sơ bộ, không tuyên bố speaker-disjoint.
-2. Rà nguồn trùng và quyền sử dụng trước khi tạo fake; bổ sung người sau kết quả sơ bộ AV-HuBERT và tạo phiên bản split nghiên cứu mới.
-3. Bước kiểm tra extraction một clip thật đã qua; tiếp theo kiểm tra vùng miệng và tỷ lệ lỗi trên một nhóm nhỏ đa dạng trước khi chạy hàng loạt.
-4. Tích hợp một generator trên mẫu phát triển nhỏ; đo chi phí và baseline đơn luồng/kết hợp trước X/Y. Chưa mở final test.
+1. Tạo fake MuseTalk cho đúng các clip val/test của `real_splits_multi_001` và chấm bằng ngưỡng lấy từ val Wav2Lip: phép thử generator chưa thấy, cũng cho biết điểm khớp tiếng–môi có bị vết mờ của Wav2Lip chi phối không.
+2. Review bằng mắt một mẫu fake của `wav2lip_multi_001`.
+3. Rà nguồn trùng và quyền sử dụng; bổ sung người từ `dataset_v2` để test có nhiều người hơn. Tập test Wav2Lip hiện đã dùng nhiều lần khi phát triển, không còn là final test.
 
 [Báo cáo chuyển đổi](docs/reports/2026-09-13_REPO_RESET.md) ghi kiểm tra thực tế và giới hạn tại thời điểm reset. Cách chạy mới: [pipeline có số](src/data/README.md). Không tự mở full download/train từ kế hoạch này.

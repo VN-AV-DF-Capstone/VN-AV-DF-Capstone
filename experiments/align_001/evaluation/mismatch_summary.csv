@@ -1,0 +1,3 @@
+split,mismatched,flagged_fake,genuine_real_flagged,auc_vs_genuine_real
+val,354,1.0,0.12994350282485875,0.9972788789939034
+test,338,1.0,0.6982248520710059,0.6761405412975736

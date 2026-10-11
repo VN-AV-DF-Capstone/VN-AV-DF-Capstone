@@ -8,7 +8,7 @@ Y là detector audio–visual; X dùng cùng detector, dữ liệu và ngân sá
 
 ## Trạng thái
 
-Repo đã chuyển sang nền xử lý dữ liệu cho hướng mới. Công cụ cắt, kiểm tra media, review, chia split và nén đã được tách khỏi pipeline AVSP-Net. `dataset_v1` đã qua review clip và chia split sơ bộ trên một người; Wav2Lip/MuseTalk mới có các run xem chất lượng, chưa duyệt làm dataset fake. Nguồn mở rộng đang tải trong `dataset_v2`. Hai nhánh AV-HuBERT đã nạp checkpoint và trích feature từ một clip thật thành công. **Chưa có thí nghiệm huấn luyện/đánh giá detector X/Y trên dataset thật.** Không có kết quả accuracy mới.
+Repo đã chuyển sang nền xử lý dữ liệu cho hướng mới. Công cụ cắt, kiểm tra media, review, chia split và nén đã được tách khỏi pipeline AVSP-Net. `dataset_v1` đã qua review clip; từ 09/10/2026 được ghép với part1 thành split 11 người và có 946 cặp real/fake Wav2Lip chưa review bằng mắt. MuseTalk mới có các run xem chất lượng. Nguồn mở rộng đang tải trong `dataset_v2`. **Kết quả sơ bộ trên Wav2Lip (09–11/10/2026):** điểm khớp tiếng–môi từ AV-HuBERT, không cần train, đạt test AUC 0,875 và bắt được tiếng ghép lệch; detector phân loại đạt 1,000 nhưng chỉ bắt vết mờ của Wav2Lip. Chi tiết và giới hạn ở [báo cáo 11/10](docs/reports/2026-10-11_WAV2LIP_SYNC_RESULTS.md). Chưa có kết quả trên generator chưa thấy, chưa chạy X.
 
 Xem [PROJECT.md](PROJECT.md) để phân biệt phần đã triển khai và phần dự kiến. Kết quả pseudo-fake/AVSP-Net nằm trong [archive](docs/archives/legacy_avsp/README.md).
 
