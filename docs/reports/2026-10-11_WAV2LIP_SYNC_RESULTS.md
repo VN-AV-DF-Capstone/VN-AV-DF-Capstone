@@ -1,6 +1,6 @@
 # Kết quả phát hiện lip-sync trên Wav2Lip (09–11/10/2026)
 
-Báo cáo của phần người 1 (AV-HuBERT + fake Wav2Lip). Mọi số liệu dưới đây chạy trên máy RTX 4050 của nhóm với dữ liệu thật, trừ khi ghi là kiểm thử giả lập. Fake **chưa được review bằng mắt**, val chỉ có 3 người và test 4 người, nên đây là kết quả sơ bộ.
+Báo cáo (AV-HuBERT + fake Wav2Lip). Mọi số liệu dưới đây chạy trên máy RTX 4050 của nhóm với dữ liệu thật, trừ khi ghi là kiểm thử giả lập. Fake **chưa được review bằng mắt**, val chỉ có 3 người và test 4 người, nên đây là kết quả sơ bộ.
 
 ## Tóm tắt
 
