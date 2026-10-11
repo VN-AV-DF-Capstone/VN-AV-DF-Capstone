@@ -8,6 +8,7 @@ import unittest
 
 import torch
 
+from src.features.sync import crop_to_best_offset
 from src.models.alignment import AlignmentModel
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -45,6 +46,16 @@ class AlignmentModelTest(unittest.TestCase):
         torch.testing.assert_close(model(late, features, lengths, max_shift=0), strict)
         with self.assertRaises(ValueError):
             model(late, features, lengths, max_shift=4)
+
+    def test_crop_to_best_offset_lines_up_audio_and_lips(self):
+        torch.manual_seed(0)
+        base = torch.randn(20, 5)
+        for offset in (2, -3):
+            visual = base.roll(-offset, dims=0)  # Video frame t carries audio frame t+offset.
+            views = crop_to_best_offset([(base, visual), (base.clone(), visual.clone())], max_offset=4)
+            for audio, cropped in views:
+                self.assertEqual(len(audio), 20 - abs(offset))
+                torch.testing.assert_close(cropped, audio)
 
     def test_padding_is_ignored_and_stays_finite(self):
         torch.manual_seed(0)
@@ -113,6 +124,19 @@ class AlignmentCliTest(unittest.TestCase):
             result = subprocess.run(command + ['--max-shift', '2'], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue((run / 'evaluation_shift2' / 'metrics.csv').is_file())
+            resynced = root / 'align_002'
+            train = subprocess.run([sys.executable, str(ROOT / 'src/training/02_train_alignment.py'),
+                                    '--manifest', str(manifest), '--out', str(resynced), '--epochs', '1',
+                                    '--hidden-dim', '8', '--max-offset', '3', '--resync', '2'],
+                                   capture_output=True, text=True)
+            self.assertEqual(train.returncode, 0, train.stderr)
+            result = subprocess.run([sys.executable, str(ROOT / 'src/evaluation/03_evaluate_alignment.py'),
+                                     '--run', str(resynced), '--real-manifest', str(real_manifest)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('resync 2', result.stdout)
+            with (resynced / 'evaluation' / 'mismatch_scores.csv').open(newline='') as handle:
+                self.assertEqual(len(list(csv.DictReader(handle))), 8)
 
 
 if __name__ == '__main__':

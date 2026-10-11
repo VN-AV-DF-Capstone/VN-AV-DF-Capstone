@@ -3,6 +3,9 @@
 Fake rows of the manifest are never loaded: training uses real train clips and the kept epoch
 has the lowest misalignment on real val clips, both compression views. Intended for fused
 AV-HuBERT features from src/features/02_fuse.py.
+--resync R first crops every clip to its best audio-video offset within R frames, estimated from
+the raw features (src/features/sync.py). Recordings differ by a few frames of constant offset, so
+without it the model can learn one typical offset as the sign of a real clip.
 """
 import argparse
 import csv
@@ -18,8 +21,8 @@ from src.models.alignment import AlignmentModel
 from src.training.dataset import PairedFeatureDataset, collate_pairs
 
 
-def real_only(manifest, split):
-    dataset = PairedFeatureDataset(manifest, split)
+def real_only(manifest, split, resync):
+    dataset = PairedFeatureDataset(manifest, split, resync)
     dataset.rows = [row for row in dataset.rows if row['label'] == '0']
     if not dataset.rows:
         raise ValueError(f'No real samples for {split}')
@@ -53,12 +56,15 @@ def main():
     parser.add_argument('--max-offset', type=int, default=10, help='Candidate audio frames each side')
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--seed', type=int, default=7)
+    parser.add_argument('--resync', type=int, default=0, help='Best-offset search range in frames (0 = off)')
     args = parser.parse_args()
     if min(args.epochs, args.batch_size, args.hidden_dim, args.max_offset, args.lr) <= 0:
         parser.error('Positive epochs/batch/hidden/max-offset/lr required')
+    if args.resync < 0:
+        parser.error('--resync must be 0 or more')
     torch.manual_seed(args.seed)
     manifest_hash = hashlib.sha256(Path(args.manifest).read_bytes()).hexdigest()
-    train, val = real_only(args.manifest, 'train'), real_only(args.manifest, 'val')
+    train, val = real_only(args.manifest, 'train', args.resync), real_only(args.manifest, 'val', args.resync)
     signature = None
     for dataset in (train, val):
         for item in dataset:

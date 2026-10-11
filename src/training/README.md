@@ -46,4 +46,10 @@ Model được import từ `src/models/`. Log, cấu hình, kết quả validati
 python src/training/02_train_alignment.py --manifest cache/features/dataset_v1/wav2lip_multi_001_crf23_32_fused/pairs.csv --out experiments/align_001
 ```
 
+Thêm `--resync R` để trước khi train, mỗi clip được cắt cho tiếng và hình khớp nhau ở độ lệch tốt nhất trong ±R frame, ước lượng từ đặc trưng thô (`src/features/sync.py`), cùng một quy tắc cho real và fake ở mọi split. Video real thu ở nhiều nơi lệch nhau vài frame cố định; không cắt thì model có thể học một độ lệch quen thuộc làm dấu hiệu của real. `03_evaluate_alignment.py` tự đọc R từ checkpoint và cắt y như vậy, cả với cặp hình–tiếng ghép lệch:
+
+```powershell
+python src/training/02_train_alignment.py --manifest cache/features/dataset_v1/wav2lip_multi_001_crf23_32_fused/pairs.csv --out experiments/align_002 --resync 5
+```
+
 `epochs.csv` ghi độ lệch trung bình của train và val. Khi tiếng và môi không có thông tin thời gian chung, giá trị khoảng log(2K+1), khoảng 3,04 với K=10 mặc định; càng thấp càng khớp.

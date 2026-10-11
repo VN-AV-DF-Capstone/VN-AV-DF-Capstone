@@ -7,6 +7,8 @@ overlap: it shows whether the model reacts to audio that does not belong to the 
 generator involved. Never pick runs, epochs or thresholds from test numbers.
 --max-shift S scores each clip at its best constant audio-video shift within S frames, so a
 real video whose recording is slightly out of sync is not called fake for that alone.
+A run trained with --resync R is scored with the same cropping, on every clip and every
+mismatched pair.
 """
 import argparse
 import csv
@@ -20,6 +22,7 @@ from torch.utils.data import DataLoader
 from src.data.preparation.manifest_io import read_rows, unique_rows
 from src.evaluation.metrics import equal_error_rate, roc_auc, threshold_report
 from src.evaluation.mismatch import REAL_MANIFEST, mismatch_partners
+from src.features.sync import crop_to_best_offset
 from src.models.alignment import AlignmentModel
 from src.training.dataset import PairedFeatureDataset, collate_pairs
 
@@ -38,15 +41,19 @@ def score(model, dataset, max_shift):
 
 
 @torch.inference_mode()
-def mismatch_scores(model, dataset, partners, max_shift):
+def mismatch_scores(model, dataset, partners, max_shift, resync):
+    """dataset must not be resynced: the cropping is estimated on the mismatched pair itself."""
     index = {row['sample_id']: i for i, row in enumerate(dataset.rows)}
     rows = []
     for sample_id, partner_id in partners.items():
         own, other = dataset[index[sample_id]], dataset[index[partner_id]]
-        for prefix, view in zip(('', 'paired_'), own['view_ids']):
-            frames = min(len(own[prefix + 'visual']), len(other[prefix + 'audio']))
-            value = model(other[prefix + 'audio'][None, :frames], own[prefix + 'visual'][None, :frames],
-                          torch.tensor([frames]), max_shift)
+        frames = min(len(own['visual']), len(other['audio']))
+        views = [(other[prefix + 'audio'][:frames], own[prefix + 'visual'][:frames])
+                 for prefix in ('', 'paired_')]
+        if resync:
+            views = crop_to_best_offset(views, resync)
+        for (audio, visual), view in zip(views, own['view_ids']):
+            value = model(audio[None], visual[None], torch.tensor([len(audio)]), max_shift)
             rows.append(dict(sample_id=sample_id, audio_from=partner_id, view_id=view, fake_score=value.item()))
     return rows
 
@@ -77,8 +84,10 @@ def main():
     model = AlignmentModel(**checkpoint['model_config'])
     model.load_state_dict(checkpoint['model'])
     model.eval()
+    resync = checkpoint['args'].get('resync', 0)  # Same cropping as in training.
     clips = unique_rows(read_rows(args.real_manifest))
-    data = {split: PairedFeatureDataset(manifest, split) for split in ('val', 'test')}
+    raw = {split: PairedFeatureDataset(manifest, split) for split in ('val', 'test')}
+    data = {split: PairedFeatureDataset(manifest, split, resync) for split in raw}
     predictions = {split: score(model, dataset, args.max_shift) for split, dataset in data.items()}
     _, threshold = equal_error_rate([r['label'] for r in predictions['val']],
                                     [r['fake_score'] for r in predictions['val']])
@@ -92,11 +101,11 @@ def main():
                                 auc=roc_auc(labels, scores), eer=equal_error_rate(labels, scores)[0],
                                 threshold=threshold, **threshold_report(labels, scores, threshold)))
 
-    seconds = len(data['val'][0]['audio']) / 25
+    seconds = len(raw['val'][0]['audio']) / 25
     mismatch, summary = [], []
-    for split, dataset in data.items():
+    for split, dataset in raw.items():
         rows = mismatch_scores(model, dataset, mismatch_partners(dataset.rows, clips, seconds, args.seed),
-                               args.max_shift)
+                               args.max_shift, resync)
         if not rows:
             raise ValueError(f'No same-speaker, non-overlapping real partners in {split}')
         values = [row['fake_score'] for row in rows]
@@ -114,7 +123,7 @@ def main():
     write_csv(output / 'metrics.csv', metrics)
     write_csv(output / 'mismatch_summary.csv', summary)
     write_csv(output / 'mismatch_scores.csv', mismatch)
-    print(f'Checkpoint epoch {checkpoint["epoch"]}; max shift {args.max_shift}; '
+    print(f'Checkpoint epoch {checkpoint["epoch"]}; resync {resync}; max shift {args.max_shift}; '
           f'threshold {threshold:.4f} from val EER')
     print('Real vs Wav2Lip fake:')
     print(f'{"split":5} {"view":6} {"real":>5} {"fake":>5} {"AUC":>6} {"EER":>6} {"acc":>6} '

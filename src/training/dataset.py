@@ -5,6 +5,7 @@ from pathlib import Path
 import torch
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset
+from src.features.sync import crop_to_best_offset
 
 
 class PairedFeatureDataset(Dataset):
@@ -16,8 +17,9 @@ class PairedFeatureDataset(Dataset):
     timeline_id identifies timestamps/preprocessing; extractor_id identifies the
     checkpoint hash, extraction mode and preprocessing version, not just a name.
     Paths are relative to the CSV. Compression pairs differ only in view_id.
+    resync R > 0 crops each clip to its best audio-video offset within ±R frames.
     """
-    def __init__(self, manifest, split):
+    def __init__(self, manifest, split, resync=0):
         if split not in {'train', 'val', 'test'}:
             raise ValueError('Use train, val or test')
         self.root = Path(manifest).resolve().parent
@@ -33,6 +35,7 @@ class PairedFeatureDataset(Dataset):
         self.rows = [row for row in rows if row['split'] == split]
         if not self.rows:
             raise ValueError(f'No samples for {split}')
+        self.resync = resync
 
     def __len__(self):
         return len(self.rows)
@@ -59,8 +62,11 @@ class PairedFeatureDataset(Dataset):
             raise ValueError('Expected two distinct compression views')
         if any(first[key].shape != second[key].shape for key in ('audio', 'visual')):
             raise ValueError('Compression views must share feature shapes')
-        return dict(audio=first['audio'].float(), visual=first['visual'].float(),
-                    paired_audio=second['audio'].float(), paired_visual=second['visual'].float(),
+        pairs = [(view['audio'].float(), view['visual'].float()) for view in views]
+        if self.resync:
+            pairs = crop_to_best_offset(pairs, self.resync)
+        (audio, visual), (paired_audio, paired_visual) = pairs
+        return dict(audio=audio, visual=visual, paired_audio=paired_audio, paired_visual=paired_visual,
                     label=int(row['label']), sample_id=row['sample_id'],
                     extractor_id=first['extractor_id'], view_ids=(first['view_id'], second['view_id']))
 
