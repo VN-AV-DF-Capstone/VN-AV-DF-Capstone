@@ -17,21 +17,13 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 import torch
-from torch.nn import functional as F
+from src.features.sync import offset_profile
 
 CHECKPOINT = ROOT / 'weights/avhubert/base_vox_iter5.pt'
 SOURCE = ROOT / 'cache/features/dataset_v1/wav2lip_multi_001_crf23_32'
 OUTPUT = ROOT / 'cache/features/dataset_v1/wav2lip_multi_001_crf23_32_fused'
 DEVICE = 'cpu'
 MAX_OFFSET = 5  # Frames either side in the printed audio-video similarity check.
-
-
-def offset_profile(audio, visual, max_offset):
-    """Cosine between time-centred video-only frame t and audio-only frame t+k, mean over t, per k."""
-    a = F.normalize(audio - audio.mean(0), dim=1)
-    v = F.normalize(visual - visual.mean(0), dim=1)
-    similarity = v @ a.T
-    return torch.stack([similarity.diagonal(k).mean() for k in range(-max_offset, max_offset + 1)])
 
 
 def main():
