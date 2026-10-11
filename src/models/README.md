@@ -1,6 +1,6 @@
 # Models — cấu trúc detector
 
-Trạng thái: có detector tối thiểu trong `detector.py`; hai nhánh AV-HuBERT đã nạp weights và kiểm tra tổng hợp ở `src/features/`. Chưa train trên dữ liệu thật.
+Trạng thái: có detector tối thiểu trong `detector.py` và model căn chỉnh tiếng–môi trong `alignment.py`. Cả hai đã train trên feature AV-HuBERT thật của run `wav2lip_multi_001` (09–11/10/2026): detector là `experiments/y_001`, model căn chỉnh là `experiments/align_001` và `align_002`. Kết quả sơ bộ ở [báo cáo 11/10](../../docs/reports/2026-10-11_WAV2LIP_SYNC_RESULTS.md).
 
 Mở `01_smoke_test.py` rồi Run để kiểm tra cả model, một vài bước train Y/X và dự đoán bằng feature giả lập. Test này không đọc video, không tải weights và không tạo kết quả nghiên cứu.
 

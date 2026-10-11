@@ -2,7 +2,7 @@
 
 Chọn interpreter `vn_av_df` trong IDE một lần (máy hiện tại: `D:\Anaconda\envs\vn_av_df\python.exe`). Dùng **Run Python File**, chạy cả file. Các bước tự xác định root repo nên không cần paste lệnh/chuyển thư mục. Không dùng Run Selection cho các file này.
 
-Sửa [preparation/settings.py](preparation/settings.py) khi đổi phiên bản, đợt tải/cắt hoặc tên reviewer. Để chạy nguồn mở rộng V2, đặt `DATASET_VERSION = 'dataset_v2'`; máy kiểm kê đã đặt local nhưng chưa commit. `dataset_v1` là bộ sơ bộ đã review và chia split. Tên phiên bản chưa có nghĩa đã khóa chất lượng/split. `download_001` của V2 đang có nguồn và file tải dở; xem [data/README.md](../../data/README.md) trước khi đổi danh sách nguồn.
+Sửa [preparation/settings.py](preparation/settings.py) khi đổi phiên bản, đợt tải/cắt hoặc tên reviewer. File này đang đặt `DATASET_VERSION = 'dataset_v2'` (đã commit), nên bước 01–05 và review chạy cho V2; đổi về `dataset_v1` nếu cần chạy lại cho V1. `dataset_v1` là bộ sơ bộ đã review và chia split. Tên phiên bản chưa có nghĩa đã khóa chất lượng/split. `download_001` của V2 đang có nguồn và file tải dở; xem [data/README.md](../../data/README.md) trước khi đổi danh sách nguồn.
 
 | Thứ tự | File mở để Run | Đầu vào → đầu ra |
 |---|---|---|
@@ -14,7 +14,7 @@ Sửa [preparation/settings.py](preparation/settings.py) khi đổi phiên bản
 | 05 | [05_build_splits.py](05_build_splits.py) | Clip đã review + người/nguồn → `real_splits.csv`, kiểm tra leakage. |
 | 07 (trước generator) | [07_add_part1.py](07_add_part1.py) | `real_splits.csv` của V1 + `review.csv` của part1 → `dataset_v1/real_splits_multi_001.csv`. Chỉ đọc split V1 đã khóa; V1 vào train, người của part1 chia train/val/test, hai người chung kênh nằm cùng split. |
 | Generator | [Wav2Lip 00/01/02](../generators/README.md) | Có settings riêng vẫn chọn `dataset_v1`. Kiểm tra setup → lập plan cho cả train/val/test → tạo real/fake candidates. Fake chưa review bằng mắt. |
-| 06 | [06_compress.py](06_compress.py) | `candidates.csv` của run generator → mỗi clip real/fake nén CRF 23 và 32, kèm `media_pairs.csv` cho bước trích feature. |
+| 06 | [06_compress.py](06_compress.py) | `candidates.csv` của run generator → mỗi clip real/fake nén CRF 23 và 32, kèm `media_pairs.csv` cho bước trích feature. Đọc `RUN_ID`/`DATASET` từ settings của generator, không theo `DATASET_VERSION`. |
 
 ## Điền videos.csv
 
@@ -41,14 +41,14 @@ Bước 03 dừng nếu batch còn video failed/pending. Bước 02 có --limit 
 
 Tải YouTube cần Node.js >= 22 trên PATH và yt-dlp[default] (gồm EJS); downloader bật Node tường minh. Python 3.10 hiện còn chạy được nhưng yt-dlp đã cảnh báo ngừng hỗ trợ trong tương lai; chưa thay môi trường Python của nhóm.
 
-Ngoài cùng `src/data/` chỉ có các file Python có số để chạy. `preparation/` chứa toàn bộ code hỗ trợ, settings.py và nhánh quality; không cần chạy lần lượt các file trong đó. Các bước model/train/evaluate mới chưa triển khai; model AVSP-Net/bốn pseudo-fake cũ ở backup, không phải phần còn chạy của luồng này.
+Ngoài cùng `src/data/` chỉ có các file Python có số để chạy. `preparation/` chứa toàn bộ code hỗ trợ, settings.py và nhánh quality; không cần chạy lần lượt các file trong đó. Các bước feature/train/đánh giá nằm ở `src/features/`, `src/training/`, `src/evaluation/` ([bảng lệnh](../README.md)); model AVSP-Net/bốn pseudo-fake cũ ở backup, không phải phần còn chạy của luồng này.
 
 
 ## Tham khảo khi cần chạy CLI riêng
 
 ## Nguồn và quyền sử dụng
 
-Điền URL video/playlist vào `data/sources/dataset_v1/videos.csv`. Bước 01 chuẩn hóa sang selected_videos.csv, tự lấy video_id; tier là nhóm nguồn tùy chọn. Giữ program_id, episode_id và bản gốc của reupload để rà leakage. File mẫu ở configs/templates/videos.csv.
+Điền URL video/playlist vào `data/sources/<dataset_version>/videos.csv`. Bước 01 chuẩn hóa sang selected_videos.csv, tự lấy video_id; tier là nhóm nguồn tùy chọn. Giữ program_id, episode_id và bản gốc của reupload để rà leakage. File mẫu ở configs/templates/videos.csv.
 
 `python -m src.data.preparation.check_licenses --videos <videos.csv> --out <new-rights.csv>` cần API key local và gọi YouTube API. Công cụ ghi license metadata, các phạm vi sử dụng vẫn pending. Đây không phải phê duyệt pháp lý.
 
@@ -84,7 +84,7 @@ Xem [công cụ review](../tools/README.md). Rà clip và bổ sung `speaker_id`
 
 `python -m src.data.preparation.build_splits --input <reviewed.csv> --out <new-splits.csv> --ratios 0.7,0.15,0.15` yêu cầu decision=keep, speaker/source xác định. Có thể dùng `0.8,0.2,0` cho pilot phát triển. Không ép tách nhóm chung host để đạt tỷ lệ; nếu không đủ nhóm, lệnh dừng.
 
-Split output giữ nguyên metadata và thêm label=0, split, group_id. Generator về sau phải dùng `inherit_variant_split` để kiểm tra nguồn real/audio và generator giữ riêng; adapter chưa triển khai.
+Split output giữ nguyên metadata và thêm label=0, split, group_id. Generator phải dùng `inherit_variant_split` để kiểm tra nguồn real/audio và generator giữ riêng; adapter Wav2Lip đã gọi hàm này cho clip nguồn và audio thay lời.
 
 ## Nén và thời gian
 

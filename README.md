@@ -14,7 +14,7 @@ Xem [PROJECT.md](PROJECT.md) để phân biệt phần đã triển khai và ph�
 
 ## Bắt đầu
 
-**Luồng chính: mở file có số rồi Run Python File trong IDE.** Chọn interpreter `vn_av_df`; đường dẫn dữ liệu do `src/data/preparation/settings.py` quyết định. Để chạy V2, đặt `DATASET_VERSION = 'dataset_v2'` (máy kiểm kê đã đặt local, chưa commit): URL nằm ở `data/sources/dataset_v2/videos.csv`, danh sách đã mở rộng ở `selected_videos.csv`, và bước 02 đang ghi `data/raw/dataset_v2/download_001/`. Khi tải đủ và xử lý lỗi, chạy `src/data/03_cut_clips.py` → `04_build_manifest.py`, review bằng các file có số trong `src/tools/review/`, rồi chia split ở bước 05. Bước 01/02 dùng để thu thập hoặc tiếp tục tải; không chạy lại bước 01 với danh sách khác rồi tiếp tục vào `download_001` đã khóa nguồn. Kiểm tra giấy phép hiện là bước riêng tùy chọn.
+**Luồng chính: mở file có số rồi Run Python File trong IDE.** Chọn interpreter `vn_av_df`; đường dẫn dữ liệu do `src/data/preparation/settings.py` quyết định. File này đang đặt `DATASET_VERSION = 'dataset_v2'` (đã commit): URL nằm ở `data/sources/dataset_v2/videos.csv`, danh sách đã mở rộng ở `selected_videos.csv`, và bước 02 ghi vào `data/raw/dataset_v2/download_001/` (đến 26/09/2026: 966/1.954 video đã tải, 908 pending, 80 failed). Khi tải đủ và xử lý lỗi, chạy `src/data/03_cut_clips.py` → `04_build_manifest.py`, review bằng các file có số trong `src/tools/review/`, rồi chia split ở bước 05. Bước 01/02 dùng để thu thập hoặc tiếp tục tải; không chạy lại bước 01 với danh sách khác rồi tiếp tục vào `download_001` đã khóa nguồn. Kiểm tra giấy phép hiện là bước riêng tùy chọn.
 
 Xem [thứ tự và đầu vào/đầu ra từng bước](src/data/README.md), [cấu trúc data hoàn chỉnh](data/README.md) và [tests theo nhóm](tests/README.md). File cấu hình chung là [settings.py](src/data/preparation/settings.py). Các lệnh CLI bên dưới chỉ là lựa chọn khi cần thao tác terminal.
 
@@ -36,19 +36,21 @@ python src/tools/review/clip_review.py --help
 
 | Đường dẫn | Nội dung |
 |---|---|
-| `src/data/` | File chạy 01–06 ở ngoài cùng; code hỗ trợ và settings.py nằm trong `preparation/`. |
+| `src/data/` | File chạy 01–07 ở ngoài cùng; code hỗ trợ và settings.py nằm trong `preparation/`. |
 | `src/data/preparation/quality/` | Đo mặt, gom người và active-speaker tùy chọn; cần kiểm chứng ngưỡng trên nguồn mới. |
 | `src/tools/review/` | Preview miệng có tiếng, review, chia/gộp công việc. |
-| `src/generators/`, `src/features/` | Khung cho tạo lip-sync fake và chuẩn bị/trích đặc trưng audio–visual. |
-| `src/models/`, `src/training/` | Detector audio–visual tối thiểu, train_step Y/X và smoke giả lập; chưa nối backbone/dataset thật. |
-| `src/evaluation/check_shortcuts.py` | Chẩn đoán metadata trên nhóm người/nguồn, không phải detector chính. |
+| `src/generators/` | Wav2Lip (run `wav2lip_multi_001` đã tạo 946 cặp) và MuseTalk (mới có run xem chất lượng). |
+| `src/features/` | Trích đặc trưng AV-HuBERT Base (`01_extract.py`) và thêm Transformer hợp nhất (`02_fuse.py`). |
+| `src/models/`, `src/training/` | Detector Y/X và model căn chỉnh tiếng–môi; đã train trên feature thật của run Wav2Lip. |
+| `src/evaluation/` | Đánh giá 01–05 (AUC/EER, kiểm tra dấu hiệu, độ lệch tiếng–hình, điểm không cần train) và `check_shortcuts.py` chẩn đoán metadata. |
 | `configs/`, `environments/` | Mẫu đầu vào và hướng dẫn môi trường. |
-| `data/`, `cache/`, `weights/`, `experiments/` | Vùng dữ liệu mới, cache, weights local và run mới; media không commit. |
+| `data/`, `cache/`, `weights/`, `experiments/` | Dữ liệu, feature, weights local và kết quả run; media/feature/weights không commit, `experiments/` chỉ commit CSV. |
+| `vn-av-df-data-part1/` | 852 clip đã review của người 2, bước 07 đọc `review.csv` ở đây; bị ignore như `data/`. Xem [data/README.md](data/README.md#clip-của-người-2-part1). |
 | `docs/` | Nghiên cứu hiện hành, planning, báo cáo và archive cũ. |
 
-Các phiên bản dataset nằm song song theo loại dữ liệu: `data/sources/dataset_v2/`, `data/raw/dataset_v2/`, rồi `data/real/dataset_v2/` và `data/manifests/dataset_v2/` khi chạy các bước sau. `data/dataset/_V2` không thuộc cấu trúc mà pipeline hiện đọc. `dataset_v1` giữ clip real, quyết định review và split sơ bộ; tránh trộn hai phiên bản hoặc đổi tên thư mục V1. Generator có settings riêng hiện vẫn dùng V1. Xem [kiểm kê dọn workspace sau review 1](docs/reports/2026-09-23_WORKSPACE_CLEANUP_AUDIT.md) trước khi bỏ media/cache của các run thử.
+Các phiên bản dataset nằm song song theo loại dữ liệu: `data/sources/dataset_v2/`, `data/raw/dataset_v2/`, rồi `data/real/dataset_v2/` và `data/manifests/dataset_v2/` khi chạy các bước sau. `data/dataset/_V2` không thuộc cấu trúc mà pipeline hiện đọc. `dataset_v1` giữ clip real, quyết định review, split sơ bộ và split nhiều người `real_splits_multi_001.csv` (V1 + part1); tránh trộn hai phiên bản hoặc đổi tên thư mục V1. Generator, nén và feature có settings riêng hiện vẫn dùng V1. Xem [kiểm kê dọn workspace sau review 1](docs/reports/2026-09-23_WORKSPACE_CLEANUP_AUDIT.md) trước khi bỏ media/cache của các run thử.
 
-Model/train/eval AVSP-Net cũ nằm trong backup và lịch sử Git. Bản model mới có detector, loader feature pairs, training Y/X và predict_batch; mở [01_smoke_test.py](src/models/01_smoke_test.py) để thử bằng tensor giả lập. [01_extract.py](src/features/01_extract.py) đã nối loader checkpoint Base pre-fusion và xử lý media vào cache cho training; xem [cách đặt weights và chạy extraction](src/features/README.md). Đã chạy end-to-end trên một clip thật với dlib/weights thật, chưa benchmark dataset; generator và evaluator theo protocol chưa tích hợp. Môi trường model tối thiểu ở [requirements-model.txt](environments/requirements-model.txt), bổ sung cho extractor ở [requirements-features.txt](environments/requirements-features.txt); chưa thử cài mới từ đầu. Xem [vai trò từng thư mục source](src/README.md).
+Model/train/eval AVSP-Net cũ nằm trong backup và lịch sử Git. Bản mới có detector, model căn chỉnh tiếng–môi, training Y/X và alignment, các bước đánh giá; mở [01_smoke_test.py](src/models/01_smoke_test.py) để thử bằng tensor giả lập. Luồng V1 + part1 → Wav2Lip → nén → [01_extract.py](src/features/01_extract.py) → `02_fuse.py` → train → đánh giá đã chạy trên dữ liệu thật ngày 09–11/10/2026 ([bảng lệnh](src/README.md), [cách đặt weights](src/features/README.md)). Fake chưa review bằng mắt, val/test chỉ có 3/4 người, chưa có generator chưa thấy; đây chưa phải benchmark. Môi trường model tối thiểu ở [requirements-model.txt](environments/requirements-model.txt), bổ sung cho extractor ở [requirements-features.txt](environments/requirements-features.txt); chưa thử cài mới từ đầu. Xem [vai trò từng thư mục source](src/README.md).
 
 ## Dữ liệu và báo cáo
 

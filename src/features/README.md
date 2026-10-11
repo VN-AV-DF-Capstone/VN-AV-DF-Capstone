@@ -41,12 +41,12 @@ Trong `01_extract.py`:
 
 - Đặt `INPUT_VIDEO` thành đường dẫn **video gốc có audio và một người nói**, không phải ROI preview.
 - Đặt `START_FRAME`, `NUM_FRAMES` theo đơn vị 25 fps. Ví dụ đoạn 0–2 giây: `0`, `50`; đoạn 1–3 giây: `25`, `50`. Cửa sổ tối đa 10 giây để giới hạn bộ nhớ.
-- Chọn `OUTPUT` chưa tồn tại; mặc định `cache/features/dataset_v1/extract_001`.
+- Đặt `OUTPUT` thành thư mục chưa tồn tại, ví dụ `cache/features/dataset_v1/smoke_002`; mặc định hiện trỏ cache của run `wav2lip_multi_001` đã có.
 - Để `DEVICE = 'cpu'` khi chưa xác minh CUDA. Bấm Run.
 
 Kết quả là `000000_feature_path.pt` và `run.json`. Clip thử có nhãn `None`, split `unassigned`: không tự coi video chưa duyệt là real và không dùng cache thử làm dữ liệu train.
 
-Mặc định `SAVE_PREVIEWS = True`: mỗi feature còn có `000000_feature_path_mouth.mp4` (miệng grayscale sau center-crop, 88×88 với Base, kèm audio cùng cửa sổ) và `000000_feature_path_mouth.png` (tối đa 8 frame mẫu trước chuẩn hóa, giữ đúng giá trị pixel). MP4 chỉ để xem/nghe, không đưa ngược vào model; PNG được lấy trực tiếp từ tensor đầu vào sau khi hoàn tác chuẩn hóa. Trong `run.json`, quality lưu chỉ số frame mẫu, số mặt phát hiện và box khuôn mặt được chọn từng frame. Có thể tắt bằng `SAVE_PREVIEWS = False` hoặc `--no-previews` khi đã kiểm tra và cần giảm output.
+Với `SAVE_PREVIEWS = True`, mỗi feature còn có `000000_feature_path_mouth.mp4` (miệng grayscale sau center-crop, 88×88 với Base, kèm audio cùng cửa sổ) và `000000_feature_path_mouth.png` (tối đa 8 frame mẫu trước chuẩn hóa, giữ đúng giá trị pixel). MP4 chỉ để xem/nghe, không đưa ngược vào model; PNG được lấy trực tiếp từ tensor đầu vào sau khi hoàn tác chuẩn hóa. Trong `run.json`, quality lưu chỉ số frame mẫu, số mặt phát hiện và box khuôn mặt được chọn từng frame. Mặc định hiện là `SAVE_PREVIEWS = False` vì ghi preview cho cả dataset rất chậm; bật lại khi kiểm tra một clip. CLI có `--no-previews` để tắt.
 
 Ngày 18/09/2026, clip `5CNS_gaH16c_s0000015202_e0000020958` lỗi ở frame 47 do Dlib nhận nhầm bàn tay là mặt phụ. Preprocessing mới khởi tạo từ một mặt duy nhất, sau đó bám box có độ chồng lấn rõ nhất với box trước đó (IoU tối thiểu 0,3 và hơn ứng viên thứ hai ít nhất 0,15). Không chọn mặt lớn nhất và không nhảy sang mặt ở vị trí khác khi mất target. Nếu ngay đầu có nhiều mặt hoặc việc bám mặt không rõ ràng, vẫn dừng; đây chưa phải model xác định ai đang nói. Không loại clip chỉ vì lỗi extractor. Quy tắc này cần kiểm chứng khi mở rộng dữ liệu.
 
@@ -72,6 +72,8 @@ python src/features/01_extract.py --video "data/real/path/to/clip.mp4" --start-f
 **Không ghép video real với video fake thành một cặp consistency.** Manifest phải đến từ nguồn nén có provenance; extractor không thể chứng minh chỉ từ nội dung media rằng hai file là các bản nén của cùng clip. Nó cũng không thay thế bước chống leakage.
 
 Mỗi view được xử lý riêng và lưu feature riêng. Kết quả đầy đủ có `pairs.csv`, các `.pt`, và `run.json`. `pairs.csv` dùng trực tiếp với `src/training/01_train.py --manifest ...`. Cả baseline Y và X dùng cùng CSV, chỉ khác consistency weight. Mẫu nào lỗi (ví dụ không bám được mặt) được ghi vào `failures.csv` kèm nhãn/split và bị loại khỏi `pairs.csv`; cuối run in số real/fake còn lại mỗi split. Kiểm tra tỷ lệ lỗi theo nhãn trước khi tin kết quả. Bị ngắt thì Run lại cùng `OUTPUT`: cache trùng khớp extractor, manifest và hash media được dùng lại. Run đã có `pairs.csv` không bị ghi đè; đổi code hoặc manifest thì cần `OUTPUT` mới.
+
+Đã chạy trên `wav2lip_multi_001_crf23_32` (CPU, 10–11/10/2026): 1.843 dòng trong `pairs.csv` (train 574/575, val 177/178, test 169/170 real/fake) và 49 lỗi trong `failures.csv` (44 thiếu landmark, 5 nhiều mặt ở frame đầu; 24 lỗi từ video G5DQYAQQ5VM). Lỗi lệch về train, cả real lẫn fake. Cache ở `cache/features/dataset_v1/wav2lip_multi_001_crf23_32/`.
 
 ## 5. Code xử lý những gì?
 
@@ -108,4 +110,4 @@ Sau khi chạy, chương trình in độ tương đồng cosine giữa đặc tr
 python src/features/02_fuse.py
 ```
 
-Mặc định đọc `cache/features/dataset_v1/wav2lip_multi_001_crf23_32` và ghi `cache/features/dataset_v1/wav2lip_multi_001_crf23_32_fused`. Output có sẵn không bị ghi đè; nếu bị ngắt giữa chừng, xóa thư mục output chưa có `pairs.csv` rồi chạy lại.
+Mặc định đọc `cache/features/dataset_v1/wav2lip_multi_001_crf23_32` và ghi `cache/features/dataset_v1/wav2lip_multi_001_crf23_32_fused`. Output có sẵn không bị ghi đè; nếu bị ngắt giữa chừng, xóa thư mục output chưa có `pairs.csv` rồi chạy lại. Đã chạy 11/10/2026 (khoảng 12 phút CPU): hình frame t giống nhất với tiếng frame t+1 ở clip thật và t+2 ở fake, nên Transformer nạp đúng. Cache `_fused` được `02_train_alignment.py`, `04_check_av_offset.py` và `05_evaluate_peak_sync.py` dùng.

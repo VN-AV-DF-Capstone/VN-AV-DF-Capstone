@@ -8,7 +8,7 @@
 - [Kế hoạch pilot](planning/KE_HOACH_PILOT_LIP_SYNC_VI.md): kế hoạch kiểm chứng trước khi mở rộng.
 - [Phân công](planning/TEAM_PLAN.md): ba đầu mối và kiểm tra chéo.
 - [Báo cáo chuyển đổi 13/09/2026](reports/2026-09-13_REPO_RESET.md): bằng chứng kỹ thuật.
-- [Kiểm kê dọn workspace 23/09/2026](reports/2026-09-23_WORKSPACE_CLEANUP_AUDIT.md): các vùng có thể dọn sau review 1 và trạng thái nguồn V2.
+- [Kiểm kê dọn workspace 23/09/2026](reports/2026-09-23_WORKSPACE_CLEANUP_AUDIT.md): các vùng có thể dọn sau review 1 và trạng thái nguồn V2 lúc đó; một số mục đã được dọn, trạng thái hiện tại ở [data/README.md](../data/README.md).
 - [Kết quả Wav2Lip 11/10/2026](reports/2026-10-11_WAV2LIP_SYNC_RESULTS.md): detector, model căn chỉnh và điểm khớp tiếng–môi trên dữ liệu thật.
 
 ## Lịch sử

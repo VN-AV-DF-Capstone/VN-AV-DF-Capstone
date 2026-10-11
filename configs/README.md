@@ -8,4 +8,4 @@
 
 Các CSV chỉ có header. Đặt bản làm việc vào `data/sources/<version>/` hoặc `data/manifests/<version>/`. Các đường dẫn trong mẫu chưa có dữ liệu; chạy mẫu nguyên trạng phải thất bại rõ ràng.
 
-Các config X/Y/features/generator chưa được tạo vì model chưa tích hợp. CRF không có mặc định trong CLI nén để tránh vô tình sử dụng mức final test khi phát triển.
+Cấu hình generator, feature và train không nằm ở đây: generator dùng `src/generators/preparation/settings.py`, trích feature sửa biến đầu `src/features/01_extract.py`, train/đánh giá dùng tham số CLI. CRF không có mặc định trong CLI nén để tránh vô tình sử dụng mức final test khi phát triển; `src/data/06_compress.py` đặt CRF 23 và 32.

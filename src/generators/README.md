@@ -24,8 +24,8 @@ PyTorch 2.0/CUDA 11.8. Danh sách dành riêng cho inference nằm trong
 [requirements-musetalk.txt](../../environments/requirements-musetalk.txt).
 Môi trường hiện tại đã chạy xong smoke, nhưng cần chạy bước 05 nếu cài lại hoặc chuyển máy.
 
-Nếu cần cài lại, chạy 04 → 05 trước khi tạo run mới. Giữ lại
-`.tmp/wheels/` nếu còn cần cài lại và `external/MuseTalk/models/` để chạy inference;
+Nếu cần cài lại, chạy 04 → 05 trước khi tạo run mới. `.tmp/wheels/` đã được dọn: khi cài lại,
+bước 04 tải lại wheel PyTorch (khoảng 2,6 GB). Giữ `external/MuseTalk/models/` để chạy inference;
 file cuối phải đúng checksum mới được cài/nạp.
 Không chạy đồng thời hai bản 04. Log cài đặt: `cache/musetalk_setup/setup.log`.
 Bản clone hiện có và S3FD từ Wav2Lip là prerequisites của setup này; đây chưa phải installer cho một máy trắng.
@@ -49,17 +49,18 @@ face enhancer/sharpening. Output đã có sẽ không bị ghi đè. Nếu 06 b�
 
 ## Wav2Lip (các bước 00–03)
 
-Adapter dùng [Wav2Lip mã nguồn mở chính thức](https://github.com/Rudrabha/Wav2Lip), chưa fine-tune. Đã qua smoke 2 giây trên RTX 4050; batch GAN `wav2lip_gpu_batch_004` hiện có 33 cặp real/fake 4 giây đã chốt metadata sau khi dừng sớm. Video còn chờ review, chưa phải benchmark chất lượng fake hoặc accuracy detector. Run mặc định hiện tại là `wav2lip_multi_001`: V1 + part1, cả train/val/test, 2 giây; chưa chạy. Tests dùng model giả lập kiểm tra hợp đồng dữ liệu; kết quả GPU thật được lưu riêng trong metadata run.
+Adapter dùng [Wav2Lip mã nguồn mở chính thức](https://github.com/Rudrabha/Wav2Lip), chưa fine-tune. Đã qua smoke 2 giây trên RTX 4050; batch GAN `wav2lip_gpu_batch_004` hiện có 33 cặp real/fake 4 giây đã chốt metadata sau khi dừng sớm. Video còn chờ review, chưa phải benchmark chất lượng fake hoặc accuracy detector. Run mặc định hiện tại là `wav2lip_multi_001` (V1 + part1, cả train/val/test, 2 giây), đã chạy 09–10/10/2026: 946/950 cặp trong khoảng 6,5 giờ trên RTX 4050; 4 clip train lỗi vì Wav2Lip không tìm thấy mặt (`failures.csv`). Plan lấy đủ 575 clip part1 (train 225, val 179, test 171) và 375 clip V1 ở train do `MAX_PER_SPLIT = 600`. `candidates.csv` vẫn `review_status=pending`; bước 06 và các bước sau đã dùng run này, nên kết quả còn sơ bộ. `wav2lip_gpu_batch_004` là run thử cũ, không bước nào đọc. Tests dùng model giả lập kiểm tra hợp đồng dữ liệu; kết quả GPU thật được lưu riêng trong metadata run.
 
 ## Chuẩn bị một lần
 
 Mã nguồn đã clone vào `external/Wav2Lip` trên máy hiện tại, thư mục này không lên Git. Máy khác chạy `git clone --depth 1 https://github.com/Rudrabha/Wav2Lip.git external/Wav2Lip` từ root repo.
 
-Tải hai weights theo liên kết từ README chính thức:
+Tải weights theo liên kết từ README chính thức (bắt buộc: Wav2Lip GAN và S3FD):
 
 | Tải | Đặt file ở đâu tính từ root repo |
 |---|---|
-| [Wav2Lip thường: Wav2Lip-SD-NOGAN.pt trong thư mục chính thức](https://drive.google.com/drive/folders/153HLrqlBNxzZcHi17PEvP09kkAfzRshM?usp=share_link) | `weights/wav2lip/wav2lip.pth` (đổi tên để khớp settings; nội dung vẫn là TorchScript) |
+| [Wav2Lip GAN trong thư mục chính thức](https://drive.google.com/drive/folders/153HLrqlBNxzZcHi17PEvP09kkAfzRshM?usp=share_link) | `weights/wav2lip/wav2lipGAN.pth` (`CHECKPOINT` trong settings). Bản đã dùng cho `wav2lip_multi_001` có SHA-256 `180cfd49d31d47f195d5bfc62830ffe2c40724b7bbbce6faadc73ac6ab1a3b8e` |
+| [Wav2Lip thường: Wav2Lip-SD-NOGAN.pt trong cùng thư mục](https://drive.google.com/drive/folders/153HLrqlBNxzZcHi17PEvP09kkAfzRshM?usp=share_link) | Tùy chọn: `weights/wav2lip/wav2lip.pth`, chỉ dùng khi đổi `CHECKPOINT` sang bản không GAN; nội dung vẫn là TorchScript |
 | [S3FD nhận diện mặt](https://www.adrianbulat.com/downloads/python-fan/s3fd-619a316812.pth) | `external/Wav2Lip/face_detection/detection/sfd/s3fd.pth` (đổi tên file tải về) |
 
 Chọn interpreter `vn_av_df`. Runtime cần torch, numpy, scipy, opencv-python, librosa, numba, tqdm và FFmpeg/FFprobe. Không cài requirements cũ của upstream đè lên môi trường AV-HuBERT. Bridge hỗ trợ cách gọi mel bằng keyword của librosa mới. Nếu dùng môi trường riêng, sửa `GENERATOR_PYTHON` trong settings. Loader nhận diện TorchScript theo nội dung archive và dùng `torch.jit.load`; checkpoint state_dict dùng `torch.load(weights_only=True)` và kiểm tra key nghiêm ngặt. Chỉ dùng TorchScript từ nguồn tin cậy như upstream chính thức; không tự chuyển sang pickle không giới hạn để bỏ qua lỗi.

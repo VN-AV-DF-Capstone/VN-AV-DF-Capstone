@@ -1,6 +1,6 @@
 # Công cụ review
 
-**Cách chạy hiện hành:** mở các file có số 01–05 trong [review/](review/README.md) rồi Run Python File. Chúng dùng dataset_v1 và tên reviewer trong src/data/preparation/settings.py. Các lệnh dưới đây là cách gọi riêng các module xử lý khi cần tùy chỉnh.
+**Cách chạy hiện hành:** mở các file có số 01–05 trong [review/](review/README.md) rồi Run Python File. Chúng dùng `DATASET_VERSION` (hiện là `dataset_v2`) và tên reviewer trong src/data/preparation/settings.py. Các lệnh dưới đây là cách gọi riêng các module xử lý khi cần tùy chỉnh.
 
 `review/` giữ giao diện review có audio, ROI preview, phân công và gộp kết quả. Không có detector AI thật/giả trong giao diện này.
 

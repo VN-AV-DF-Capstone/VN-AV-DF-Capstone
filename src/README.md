@@ -8,13 +8,13 @@
 |---|---|---|
 | [data/](data/README.md) | Các bước chạy 01–07, settings và logic thu thập, tải, cắt, manifest, split, nén, quality | Có code |
 | [tools/review/](tools/review/README.md) | Xem/nghe clip, phân công và gộp review | Có code và file chạy có số |
-| [generators/](generators/README.md) | Tạo lip-sync fake | Wav2Lip/MuseTalk đã chạy các batch xem chất lượng trên V1; output còn chờ review, chưa nối vào dataset huấn luyện |
+| [generators/](generators/README.md) | Tạo lip-sync fake | Wav2Lip: run `wav2lip_multi_001` (946 cặp, cả ba split) là dữ liệu train/eval hiện tại, chưa review bằng mắt. MuseTalk mới có các run xem chất lượng trên clip train |
 | [features/](features/README.md) | Chuẩn bị audio/vùng miệng, trích đặc trưng cho model | 01_extract: loader Base pre-fusion, preprocessing, cache cho training; đã chạy một clip thật với pretrained/landmark thật. 02_fuse: thêm Transformer hợp nhất lên cache có sẵn |
 | [models/](models/README.md) | Detector nhận audio/visual features | Có detector.py, alignment.py (căn chỉnh tiếng–môi) và 01_smoke_test.py |
-| [training/](training/README.md) | Học nhãn và consistency cho X/Y | Loader paired features, train/validation theo epoch, best checkpoint; 02_train_alignment chỉ học trên real; kiểm chứng giả lập |
+| [training/](training/README.md) | Học nhãn và consistency cho X/Y | Loader paired features, train/validation theo epoch, best checkpoint; 02_train_alignment chỉ học trên real. Đã chạy `y_001`, `align_001`, `align_002` trên feature thật |
 | [evaluation/](evaluation/README.md) | Dự đoán và đánh giá | 01_evaluate: AUC/EER/accuracy theo split và mức nén; 02_check_cues: bỏ modality và ghép tiếng lệch; 03_evaluate_alignment cho model căn chỉnh; 04_check_av_offset: độ lệch tiếng–hình từng clip; 05_evaluate_peak_sync: điểm không cần train; check_shortcuts.py |
 
-Luồng: dữ liệu đã chia split → tạo fake → tạo các bản nén → chuẩn bị audio/visual → train detector → đánh giá. Các bước đã nối với nhau bằng đường dẫn mặc định (bảng dưới) và mới chạy thử bằng media tổng hợp; chưa chạy trên dữ liệu thật, chưa có fake đã duyệt hay kết quả detector.
+Luồng: dữ liệu đã chia split → tạo fake → tạo các bản nén → chuẩn bị audio/visual → train detector → đánh giá. Các bước đã nối với nhau bằng đường dẫn mặc định (bảng dưới) và đã chạy trên dữ liệu thật ngày 09–11/10/2026 ([báo cáo](../docs/reports/2026-10-11_WAV2LIP_SYNC_RESULTS.md)). Fake chưa review bằng mắt, nên kết quả còn sơ bộ.
 
 ## Luồng fake → train → kết quả (V1 + part1)
 
@@ -36,6 +36,6 @@ Chạy từ root repo bằng `vn_av_df`, theo thứ tự. Bước 2–4 chạy l
 
 Bước 8–11 không cho model thấy fake khi train, nên model không thể học vết hình riêng của Wav2Lip. Fake chỉ dùng để chọn ngưỡng trên val và đánh giá.
 
-X dùng cùng lệnh bước 5 với `--consistency-weight` lớn hơn 0 và `--out` mới. Kết quả bước 6 là kết quả sơ bộ: fake chưa review bằng mắt, val chỉ có 3 người và test 4 người. Để chạy pipeline data V2, đặt `DATASET_VERSION = 'dataset_v2'` trong `data/preparation/settings.py`; generator có cấu hình V1 riêng.
+X dùng cùng lệnh bước 5 với `--consistency-weight` lớn hơn 0 và `--out` mới. Kết quả bước 6 là kết quả sơ bộ: fake chưa review bằng mắt, val chỉ có 3 người và test 4 người. `data/preparation/settings.py` đang đặt `DATASET_VERSION = 'dataset_v2'` cho pipeline data 01–05; bước 07, generator, nén và feature có đường dẫn V1 riêng nên không đổi theo.
 
 Video ở `data/`, đặc trưng tính sẵn ở `cache/`, weights tải về ở `weights/`, đầu ra train/eval ở `experiments/`. Các đường dẫn này nằm ở root repo, không nằm trong `src/`.

@@ -1,6 +1,6 @@
 # Evaluation — đánh giá model
 
-Hiện có `check_shortcuts.py`: thử dự đoán bằng metadata của media để phát hiện dấu hiệu phụ. Đây chưa phải chương trình đánh giá detector audio–visual.
+File chạy có số 01–05 bên dưới đánh giá detector và các điểm khớp tiếng–môi; đã chạy trên run Wav2Lip, kết quả ở `experiments/` ([danh sách run](../../experiments/README.md)). `check_shortcuts.py` riêng thì thử dự đoán bằng metadata của media để phát hiện dấu hiệu phụ, không phải chương trình đánh giá detector audio–visual.
 
 Có thêm `predict.py`: hàm predict_batch nhận model và feature audio/visual, trả fake_score và nhãn dự đoán. Ngưỡng mặc định 0.5 chỉ để kiểm tra luồng code.
 

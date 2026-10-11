@@ -1,8 +1,9 @@
 # Training — huấn luyện detector
 
 Trạng thái: có train_step, loader cache feature, padding batch, vòng train/validation
-và CLI `01_train.py` lưu best.pt cùng epochs.csv. Đã thiết kế để nhận feature thật,
-nhưng hiện chỉ kiểm chứng trên dữ liệu giả lập. CLI nền chạy CPU.
+và CLI `01_train.py` lưu best.pt cùng epochs.csv. Đã chạy trên feature thật của
+`wav2lip_multi_001`: `experiments/y_001` (Y), `align_001` và `align_002` (model căn chỉnh).
+X chưa chạy. CLI chạy CPU.
 
 CSV đầu vào: `sample_id,label,split,feature_path,paired_feature_path`. Path tương đối
 với CSV; split dùng train/val/test; real=0, fake=1. sample_id phải chỉ rõ clip
@@ -34,11 +35,11 @@ Y dùng `consistency_weight=0`; X dùng trọng số lớn hơn 0. Cả hai đ�
 
 Batch có audio, visual, paired_audio, paired_visual, lengths, labels, sample_ids và paired_sample_ids. Mỗi ID phải xác định cùng clip và cửa sổ; cặp chỉ khác mức nén, không phải real ghép với fake. Feature phải được trích thật từ từng view bằng cùng cấu hình. Hàm kiểm tra ID/hình dạng, nhưng không thể xác minh nguồn gốc media chỉ từ tensor.
 
-Chứa cách đọc manifest/đặc trưng thành batch, vòng lặp train, cách tính lỗi, cập nhật model, validation và lưu checkpoint. Phần khuyến khích dự đoán nhất quán giữa các bản nén của phương pháp X sẽ nằm ở đây.
+Chứa cách đọc manifest/đặc trưng thành batch, vòng lặp train, cách tính lỗi, cập nhật model, validation và lưu checkpoint. Phần khuyến khích dự đoán nhất quán giữa các bản nén của phương pháp X nằm trong `steps.py`.
 
 Nhận split đã khóa từ luồng data; không tự chia ngẫu nhiên lại clip. X/Y dùng cùng dữ liệu, bản nén và ngân sách train. Chỉ chọn cấu hình/ngưỡng trên validation, không dùng final test để chọn model.
 
-Model được import từ `src/models/`. Log, cấu hình, kết quả validation và checkpoint ghi vào `experiments/<run_id>/`, không vào source. File chạy có số sẽ được thêm ngay trong thư mục training khi phần train được triển khai.
+Model được import từ `src/models/`. Log, cấu hình, kết quả validation và checkpoint ghi vào `experiments/<run_id>/`, không vào source. File chạy có số: `01_train.py` (Y/X) và `02_train_alignment.py` (model căn chỉnh).
 
 `02_train_alignment.py` train model căn chỉnh tiếng–môi (`src/models/alignment.py`) **chỉ trên clip real**, theo ý tưởng AVH-Align. Dòng fake trong manifest không được đọc khi train; epoch được giữ là epoch có độ lệch thấp nhất trên clip real của val. Dùng với đặc trưng từ `src/features/02_fuse.py`:
 

@@ -12,9 +12,9 @@ Thực hiện sau `src/data/04_build_manifest.py`. Dùng interpreter đã chọn
 
 File không có số là phần xử lý mà các bước này gọi. `build_review_manifest.py` chỉ dùng nếu cần ghép thêm điểm đo từ các công cụ quality. `mouth_roi.py` là hàm crop, không phải bước chạy độc lập. Công cụ quality/active-speaker là nhánh tùy chọn, không bắt buộc chạy trước review thủ công.
 
-Trước bước 05 của pipeline, mở `data/manifests/dataset_v1/reviewed_clips.csv`, bổ sung `speaker_id` nhất quán giữa mọi tập (và speaker_ids nếu liên quan nhiều người). Giao diện hiện chỉ review chất lượng, **chưa tự gán danh tính người nói**. Giữ source_video/canonical_source_id để kiểm tra leakage. Review pass chưa đồng nghĩa clip đã sẵn sàng train.
+Trước bước 05 của pipeline, mở `data/manifests/<dataset_version>/reviewed_clips.csv`, bổ sung `speaker_id` nhất quán giữa mọi tập (và speaker_ids nếu liên quan nhiều người). Giao diện hiện chỉ review chất lượng, **chưa tự gán danh tính người nói**. Giữ source_video/canonical_source_id để kiểm tra leakage. Review pass chưa đồng nghĩa clip đã sẵn sàng train.
 
-## Review và đồng bộ bằng Git
+## Review theo người và gộp kết quả
 
 Rubric v4: Keep giữ nguyên hành vi và tùy chọn tự chuyển. Bấm Reject (R) để mở
 popup, chọn một lý do (hoặc phím 1–7) sẽ lưu và chuyển clip tiếp theo, kể cả khi
@@ -29,29 +29,23 @@ Video gốc và ROI đồng bộ tua/phát/dừng/tốc độ. Đây là đồng
 sửa lệch audio/video có sẵn trong file. Khởi động lại chương trình review và refresh
 trình duyệt sau khi cập nhật code.
 
-Pull nhánh `codex/research-reset`. Giải nén video từ Drive vào
-`data/manifests/dataset_v1/reviews/exports/clips/<tên>/`, cạnh assignment có sẵn.
-Không tạo thêm một folder tên người bên trong folder đó. Có thể đặt video vào
-`media/` và ROI vào `roi/` bên trong folder của mình. Không cần chạy lại bước 01/02/05.
-
-Từ root repo, Linh chạy:
+Đặt video và assignment của mình vào
+`data/manifests/<dataset_version>/reviews/exports/clips/<tên>/`. Không tạo thêm một folder
+tên người bên trong folder đó. Có thể đặt video vào `media/` và ROI vào `roi/` bên trong
+folder của mình. Từ root repo, mỗi người mở giao diện bằng tên mình:
 
 ```powershell
 python src/tools/review/03_review_clips.py --reviewer nguyenvanlinh
 ```
 
 Lâm Anh dùng `--reviewer nguyenlamanh`, Nhật dùng `--reviewer nguyenminhnhat`.
-Không cần sửa settings.py. Giao diện tự lưu; khi nghỉ, dừng bằng Ctrl+C rồi commit:
+Không cần sửa settings.py. Giao diện tự lưu `review_<tên>.csv` trong folder đó; khi nghỉ,
+dừng bằng Ctrl+C. Không xóa hay ghi đè CSV kết quả khi giải nén lại. Khi cả nhóm xong,
+người tổng hợp gom các `review_<tên>.csv` về đúng chỗ rồi chạy
+`python src/tools/review/04_merge_reviews.py`.
 
-```powershell
-git add data/manifests/dataset_v1/reviews/exports/clips/nguyenvanlinh/review_nguyenvanlinh.csv
-git commit -m "Review clips by nguyenvanlinh"
-git pull --rebase origin codex/research-reset
-git push origin codex/research-reset
-```
-
-Mỗi người thay cả đường dẫn và tên bằng tên mình, chỉ sửa kết quả của mình.
-Nếu push báo nhánh remote có commit mới, pull --rebase rồi push lại; không force-push.
-Git theo dõi CSV/metadata; media, ZIP và data/real được ignore. Không xóa hay
-ghi đè CSV kết quả khi giải nén lại. Khi cả nhóm xong, người tổng hợp pull và chạy
-`python src/tools/review/04_merge_reviews.py`; không cần chép kết quả thủ công.
+Review 1 của V1 đã gộp xong ngày 18/09/2026: đủ 2.252 quyết định, 1.143 Keep, 1.109 Reject
+(`data/manifests/dataset_v1/reviews/merged/`). Khi đó các CSV review được đồng bộ qua Git
+trên nhánh `codex/research-reset`. Từ commit `b27d891` (21/09/2026) cả `data/` bị Git ignore,
+nên cách đó không còn dùng được; các `review_<tên>.csv` của review 1 chỉ còn trong lịch sử
+Git trước commit đó. Đợt review sau cần thống nhất cách chia sẻ CSV (ví dụ Drive) trước khi bắt đầu.
