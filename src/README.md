@@ -12,7 +12,7 @@
 | [features/](features/README.md) | Chuẩn bị audio/vùng miệng, trích đặc trưng cho model | 01_extract: loader Base pre-fusion, preprocessing, cache cho training; đã chạy một clip thật với pretrained/landmark thật |
 | [models/](models/README.md) | Detector nhận audio/visual features | Có detector.py và 01_smoke_test.py; backbone chưa có |
 | [training/](training/README.md) | Học nhãn và consistency cho X/Y | Loader paired features, train/validation theo epoch, best checkpoint; kiểm chứng giả lập |
-| [evaluation/](evaluation/README.md) | Dự đoán và đánh giá | 01_evaluate: AUC/EER/accuracy theo split và mức nén; check_shortcuts.py |
+| [evaluation/](evaluation/README.md) | Dự đoán và đánh giá | 01_evaluate: AUC/EER/accuracy theo split và mức nén; 02_check_cues: bỏ modality và ghép tiếng lệch; check_shortcuts.py |
 
 Luồng: dữ liệu đã chia split → tạo fake → tạo các bản nén → chuẩn bị audio/visual → train detector → đánh giá. Các bước đã nối với nhau bằng đường dẫn mặc định (bảng dưới) và mới chạy thử bằng media tổng hợp; chưa chạy trên dữ liệu thật, chưa có fake đã duyệt hay kết quả detector.
 
@@ -28,6 +28,7 @@ Chạy từ root repo bằng `vn_av_df`, theo thứ tự. Bước 2–4 chạy l
 | 4 | `python src/features/01_extract.py` | Feature AV-HuBERT và `pairs.csv` ở `cache/features/dataset_v1/wav2lip_multi_001_crf23_32/` |
 | 5 | `python src/training/01_train.py --manifest cache/features/dataset_v1/wav2lip_multi_001_crf23_32/pairs.csv --out experiments/y_001 --epochs 30` | Baseline Y; `best.pt` chọn theo loss val |
 | 6 | `python src/evaluation/01_evaluate.py --run experiments/y_001` | AUC, EER, accuracy theo split và mức nén; ngưỡng chọn trên val |
+| 7 | `python src/evaluation/02_check_cues.py --run experiments/y_001` | Train lại chỉ hình/chỉ tiếng và chấm hình real ghép tiếng real khác cùng người: model bắt vết generator hay độ khớp môi |
 
 X dùng cùng lệnh bước 5 với `--consistency-weight` lớn hơn 0 và `--out` mới. Kết quả bước 6 là kết quả sơ bộ: fake chưa review bằng mắt, val chỉ có 3 người và test 4 người. Để chạy pipeline data V2, đặt `DATASET_VERSION = 'dataset_v2'` trong `data/preparation/settings.py`; generator có cấu hình V1 riêng.
 
