@@ -32,6 +32,20 @@ class AlignmentModelTest(unittest.TestCase):
         shifted = model(features.roll(2, dims=1), features, lengths)
         self.assertTrue(torch.all(aligned < shifted))
 
+    def test_shift_tolerance_forgives_a_constant_offset(self):
+        torch.manual_seed(0)
+        model = AlignmentModel(6, 6, hidden_dim=8, max_offset=3)
+        with torch.no_grad():
+            model.audio_projection[-1].bias.zero_()
+        model.visual_projection.load_state_dict(model.audio_projection.state_dict())
+        features, lengths = torch.randn(3, 12, 6), torch.tensor([12, 12, 12])
+        late = features.roll(2, dims=1)  # Audio two frames late: lips at t match audio at t+2.
+        strict, tolerant = model(late, features, lengths), model(late, features, lengths, max_shift=2)
+        self.assertTrue(torch.all(tolerant < strict))
+        torch.testing.assert_close(model(late, features, lengths, max_shift=0), strict)
+        with self.assertRaises(ValueError):
+            model(late, features, lengths, max_shift=4)
+
     def test_padding_is_ignored_and_stays_finite(self):
         torch.manual_seed(0)
         model = AlignmentModel(4, 6, hidden_dim=8, max_offset=3)
@@ -96,6 +110,9 @@ class AlignmentCliTest(unittest.TestCase):
             with (output / 'mismatch_summary.csv').open(newline='') as handle:
                 self.assertEqual([s['split'] for s in csv.DictReader(handle)], ['val', 'test'])
             self.assertNotEqual(subprocess.run(command, capture_output=True).returncode, 0)
+            result = subprocess.run(command + ['--max-shift', '2'], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((run / 'evaluation_shift2' / 'metrics.csv').is_file())
 
 
 if __name__ == '__main__':

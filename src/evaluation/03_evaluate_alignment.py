@@ -5,6 +5,8 @@ EER point (real vs fake, both compression views) and is applied unchanged to tes
 scores REAL video with audio of another REAL clip of the same speaker and split without time
 overlap: it shows whether the model reacts to audio that does not belong to the lips, with no
 generator involved. Never pick runs, epochs or thresholds from test numbers.
+--max-shift S scores each clip at its best constant audio-video shift within S frames, so a
+real video whose recording is slightly out of sync is not called fake for that alone.
 """
 import argparse
 import csv
@@ -23,12 +25,12 @@ from src.training.dataset import PairedFeatureDataset, collate_pairs
 
 
 @torch.inference_mode()
-def score(model, dataset):
+def score(model, dataset, max_shift):
     """One row per sample and compression view."""
     rows = []
     for batch in DataLoader(dataset, batch_size=32, collate_fn=collate_pairs):
         for view, prefix in enumerate(('', 'paired_')):
-            values = model(batch[prefix + 'audio'], batch[prefix + 'visual'], batch['lengths'])
+            values = model(batch[prefix + 'audio'], batch[prefix + 'visual'], batch['lengths'], max_shift)
             rows += [dict(sample_id=sample_id, label=int(label), view_id=views[view], fake_score=float(value))
                      for sample_id, label, views, value in
                      zip(batch['sample_ids'], batch['labels'], batch['view_ids'], values)]
@@ -36,7 +38,7 @@ def score(model, dataset):
 
 
 @torch.inference_mode()
-def mismatch_scores(model, dataset, partners):
+def mismatch_scores(model, dataset, partners, max_shift):
     index = {row['sample_id']: i for i, row in enumerate(dataset.rows)}
     rows = []
     for sample_id, partner_id in partners.items():
@@ -44,7 +46,7 @@ def mismatch_scores(model, dataset, partners):
         for prefix, view in zip(('', 'paired_'), own['view_ids']):
             frames = min(len(own[prefix + 'visual']), len(other[prefix + 'audio']))
             value = model(other[prefix + 'audio'][None, :frames], own[prefix + 'visual'][None, :frames],
-                          torch.tensor([frames]))
+                          torch.tensor([frames]), max_shift)
             rows.append(dict(sample_id=sample_id, audio_from=partner_id, view_id=view, fake_score=value.item()))
     return rows
 
@@ -62,9 +64,10 @@ def main():
     parser.add_argument('--real-manifest', type=Path, default=REAL_MANIFEST,
                         help='Real clips with speaker_id, source_video and start_time')
     parser.add_argument('--seed', type=int, default=7, help='Choice of mismatch partners')
+    parser.add_argument('--max-shift', type=int, default=0, help='Tolerated constant offset in frames')
     args = parser.parse_args()
     run = Path(args.run)
-    output = run / 'evaluation'
+    output = run / ('evaluation' if args.max_shift == 0 else f'evaluation_shift{args.max_shift}')
     if output.exists():
         parser.error(f'Already evaluated; keep it and train a new run instead: {output}')
     checkpoint = torch.load(run / 'best.pt', map_location='cpu', weights_only=True)
@@ -76,7 +79,7 @@ def main():
     model.eval()
     clips = unique_rows(read_rows(args.real_manifest))
     data = {split: PairedFeatureDataset(manifest, split) for split in ('val', 'test')}
-    predictions = {split: score(model, dataset) for split, dataset in data.items()}
+    predictions = {split: score(model, dataset, args.max_shift) for split, dataset in data.items()}
     _, threshold = equal_error_rate([r['label'] for r in predictions['val']],
                                     [r['fake_score'] for r in predictions['val']])
     metrics = []
@@ -92,7 +95,8 @@ def main():
     seconds = len(data['val'][0]['audio']) / 25
     mismatch, summary = [], []
     for split, dataset in data.items():
-        rows = mismatch_scores(model, dataset, mismatch_partners(dataset.rows, clips, seconds, args.seed))
+        rows = mismatch_scores(model, dataset, mismatch_partners(dataset.rows, clips, seconds, args.seed),
+                               args.max_shift)
         if not rows:
             raise ValueError(f'No same-speaker, non-overlapping real partners in {split}')
         values = [row['fake_score'] for row in rows]
@@ -110,7 +114,8 @@ def main():
     write_csv(output / 'metrics.csv', metrics)
     write_csv(output / 'mismatch_summary.csv', summary)
     write_csv(output / 'mismatch_scores.csv', mismatch)
-    print(f'Checkpoint epoch {checkpoint["epoch"]}; threshold {threshold:.4f} from val EER')
+    print(f'Checkpoint epoch {checkpoint["epoch"]}; max shift {args.max_shift}; '
+          f'threshold {threshold:.4f} from val EER')
     print('Real vs Wav2Lip fake:')
     print(f'{"split":5} {"view":6} {"real":>5} {"fake":>5} {"AUC":>6} {"EER":>6} {"acc":>6} '
           f'{"bal_acc":>7} {"real_FA":>7} {"fake_miss":>9}')

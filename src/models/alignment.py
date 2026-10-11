@@ -21,6 +21,8 @@ class AlignmentModel(nn.Module):
     the synchronized one. The output is the mean over frames of -log p(synchronized frame): about
     log(2K+1) when audio and lips share no timing, near 0 when they match. Training minimizes it
     on real clips; a high value on a test clip means audio and lips disagree.
+    With max_shift S, the synchronized frame may instead be t+s for one constant s in [-S, S] per
+    clip and the best s is kept: a constant offset of up to S frames is then not penalized.
     """
     temperature = 0.1
 
@@ -30,12 +32,14 @@ class AlignmentModel(nn.Module):
         self.visual_projection = _projection(visual_dim, hidden_dim)
         self.max_offset = max_offset
 
-    def forward(self, audio, visual, lengths):
+    def forward(self, audio, visual, lengths, max_shift=0):
         if audio.ndim != 3 or visual.ndim != 3 or audio.shape[:2] != visual.shape[:2]:
             raise ValueError('Audio and visual must share batch size and aligned time steps')
         if (lengths.shape != (audio.shape[0],) or lengths.is_floating_point()
                 or torch.any(lengths < 1) or torch.any(lengths > audio.shape[1])):
             raise ValueError('Lengths must be integer valid-frame counts, one per sample')
+        if not 0 <= max_shift <= self.max_offset:
+            raise ValueError('max_shift must lie between 0 and max_offset')
         a = F.normalize(self.audio_projection(audio), dim=-1)
         v = F.normalize(self.visual_projection(visual), dim=-1)
         frames, device = audio.shape[1], audio.device
@@ -45,6 +49,10 @@ class AlignmentModel(nn.Module):
         lengths = lengths.to(device)
         valid = (candidates >= 0) & (candidates < lengths[:, None, None])
         valid[..., self.max_offset] = True  # Keeps padded frames finite; they are dropped below.
-        loss = -logits.masked_fill(~valid, float('-inf')).log_softmax(-1)[..., self.max_offset]
+        loss = -logits.masked_fill(~valid, float('-inf')).log_softmax(-1)
         counted = torch.arange(frames, device=device)[None] < lengths[:, None]
-        return torch.where(counted, loss, 0.0).sum(1) / lengths
+        scores = []
+        for shift in range(self.max_offset - max_shift, self.max_offset + max_shift + 1):
+            used = counted & valid[..., shift]  # Frames whose shifted audio frame exists.
+            scores.append(torch.where(used, loss[..., shift], 0.0).sum(1) / used.sum(1).clamp(min=1))
+        return torch.stack(scores).min(0).values

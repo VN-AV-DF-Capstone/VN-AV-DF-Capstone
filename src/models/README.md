@@ -10,6 +10,6 @@ Chứa detector kết hợp đặc trưng audio và hình ảnh, xử lý thông
 
 Baseline Y và phương pháp X dùng cùng cấu trúc detector. Theo hướng hiện tại, khác biệt chính của X là thêm yêu cầu nhất quán giữa các bản nén trong lúc huấn luyện; phần đó thuộc `src/training/`, không cần tạo hai kiến trúc khác nhau chỉ vì có tên X/Y.
 
-`alignment.py` là model căn chỉnh tiếng–môi theo ý tưởng AVH-Align (Smeu và cộng sự, CVPR 2025), không phải bản tái lập bài báo. Mỗi luồng đi qua một MLP nhỏ. Với frame hình t, các frame tiếng t−K..t+K của cùng clip là ứng viên và frame t là đáp án đúng. Đầu ra là độ lệch trung bình của clip: −log xác suất chọn đúng frame tiếng khớp. Model chỉ học trên real, nên điểm cao nghĩa là tiếng và môi không khớp, không phải "giống Wav2Lip".
+`alignment.py` là model căn chỉnh tiếng–môi theo ý tưởng AVH-Align (Smeu và cộng sự, CVPR 2025), không phải bản tái lập bài báo. Mỗi luồng đi qua một MLP nhỏ. Với frame hình t, các frame tiếng t−K..t+K của cùng clip là ứng viên và frame t là đáp án đúng. Đầu ra là độ lệch trung bình của clip: −log xác suất chọn đúng frame tiếng khớp. Model chỉ học trên real, nên điểm cao nghĩa là tiếng và môi không khớp, không phải "giống Wav2Lip". Với `max_shift=S`, mỗi clip được chấm ở độ lệch cố định tốt nhất trong ±S frame, nên một độ lệch đều nhỏ không bị phạt; train vẫn dùng `max_shift=0`.
 
 Vòng lặp train ở `src/training/01_train.py`, tính chỉ số ở `src/evaluation/`. Checkpoint tải về nằm trong `weights/`; CLI train lưu checkpoint tại `experiments/<run_id>/best.pt` khi chọn thư mục output tương ứng.
