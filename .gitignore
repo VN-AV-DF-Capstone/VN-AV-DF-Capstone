@@ -14,6 +14,13 @@ env/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+*.egg-info/
+.venv*/
+.test-work/
+.test-env*/
+.kaggle-tools/
 .tmp/
 .temp/
 external/
@@ -43,8 +50,20 @@ weights/**
 /data/*
 !/data/README.md
 experiments/**/checkpoints/
-# Person 2's reviewed part1 clips are data like /data/ (path used by src/data/07_add_part1.py).
 /vn-av-df-data-part1/
+# v003 runtime output (generation plans, datasets, runs, media checkpoints)
+/generation/plans/
+/checkpoints/
+/datasets/
+/runs/
+/outputs/
+/kaggle_outputs/
+/artifacts/
+/references/*.pdf
+/wandb/
+**/wandb/
+# Dữ liệu fake sinh từ part real (video người thật): không bao giờ đưa lên git
+/vn-av-df-data-part*_fake/
 experiments/**/*.log
 
 # Docs/configs/code and selected small experiment results are tracked normally.

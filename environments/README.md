@@ -1,26 +1,23 @@
-# Môi trường
+# Môi trường worker
 
-Đợt chuyển đổi được kiểm tra trong môi trường data sẵn có: Python 3.10.20, FFmpeg/FFprobe trong PATH. `requirements.txt` ghi các phiên bản dependency trực tiếp đã quan sát. Chưa thử cài mới toàn bộ môi trường từ đầu.
+Generator, TTS và AV-HuBERT có dependency xung đột nhau (Python, torch, fairseq, MMLab), nên mỗi cái chạy trong một môi trường riêng. Kernel chính chỉ gửi việc qua giao thức worker (`vn_av_df.worker`). Mọi môi trường dựng bằng Micromamba trên Kaggle/Linux, đặt ở `--env-root` (notebook: `WORKERS = /kaggle/temp/vn-av-df-workers`, ngoài Output 20 GB, mất khi hết phiên).
 
-| Công việc | Cần gì |
-|---|---|
-| CSV/split/quyền sử dụng dry-run | Phần lớn thư viện chuẩn Python. |
-| Tải YouTube | yt-dlp[default] (gồm EJS), Node.js >= 22 trên PATH, FFmpeg/FFprobe. Đã thử tải thực tế với yt-dlp 2026.8.19, EJS 0.8.0 và Node 24.11.0; Python 3.10 vẫn chạy nhưng yt-dlp đã cảnh báo ngừng hỗ trợ trong tương lai. |
-| Review, kiểm tra media và test | Dependency trong requirements; FFmpeg/FFprobe. |
-| Cắt có VAD/YOLO, tạo ROI thực | Thêm Torch, Ultralytics và weights/local VAD. Môi trường hiện có Torch 2.12.0+cu126, Ultralytics 8.4.53; chưa cài lại/chạy full trong đợt này. |
-| Face embedding / active speaker tùy chọn | InsightFace/ONNX runtime và repo/model ngoài theo CLI. Không tự tải/chạy từ smoke test. |
-| AV-HuBERT Base pre-fusion | Cần Torch >=2.6, FFmpeg và requirements-features.txt; không cần Fairseq/OmegaConf cho checkpoint Base này. Ngày 16/09: dlib CPU 20.0.1 đã cài vào vn_av_df; đã nạp weights/landmark và trích feature một clip thật thành công; 10–11/10/2026 đã trích 1.843 mẫu của run Wav2Lip trên CPU và chạy `02_fuse.py`. Xem src/features/README.md. |
-| Wav2Lip | Bridge trong vn_av_df (librosa 0.11.0, Numba 0.65.1), hỗ trợ checkpoint TorchScript/state_dict. Đã qua forward batch 1/8 trên CUDA và tạo 946 cặp real/fake 2 giây (run `wav2lip_multi_001`) trên RTX 4050 Laptop 6 GB; không đổi dependency. Xem src/generators/README.md. MuseTalk chạy trong venv riêng, xem bên dưới. |
+| Script | Môi trường | Dùng ở |
+|---|---|---|
+| [bootstrap_worker.py](bootstrap_worker.py) | `avhubert` ([avhubert.yml](avhubert.yml)), `musetalk` ([musetalk.yml](musetalk.yml)) | notebook prepare / generate |
+| [worker_envs.py](worker_envs.py) | `gen_vrt`, `gen_iplap`, `gen_latentsync`, `gen_diff2lip`, `tts_vieneu`, `tts_f5`, `tts_omnivoice`, `tts_voxcpm`, `tts_xtts`, `vc_seedvc` | notebook generate |
 
-Trong PowerShell, có thể gọi `& '<đường dẫn python của môi trường data>' -m unittest discover -s tests -q`. Không mặc định Python base là môi trường đúng.
+Wav2Lip chạy trong Python chính (extra `generation`), không cần môi trường riêng.
 
-File `docs/archives/legacy_avsp/environment/requirements.txt` là môi trường lịch sử, không là hướng dẫn cài model mới.
+```bash
+# Từ project root, Linux x86_64, sau khi tải source/weights (src/generators/00_setup.py, src/models/v003/00_setup.py).
+python environments/bootstrap_worker.py avhubert --env-root /kaggle/temp/vn-av-df-workers
+python environments/worker_envs.py tts_f5 --env-root /kaggle/temp/vn-av-df-workers
+```
 
-MuseTalk 1.5 có bộ chuẩn bị riêng cho **5 video × 2 giây chạy local**:
-`src/generators/04_musetalk_setup.py` → `05_musetalk_check.py` → `06_musetalk_generate.py`.
-Chọn interpreter `vn_av_df` để Run; setup chỉ cài vào `external/MuseTalk/.venv`.
-`requirements-musetalk.txt` dành riêng cho venv này, không cài vào `vn_av_df`.
-Đã cài đủ dependencies/weights và chạy inference thật: smoke 5 clip và run so sánh `quality_10x2s_002`; output còn chờ review bằng mắt.
-Chi tiết và output: [src/generators/README.md](../src/generators/README.md).
+Script in đường dẫn Python của môi trường; notebook tự gán vào `cfg["envs"]`, `cfg["musetalk"]["python"]`, `cfg["encoders"]["avhubert"]["python"]`. Ở local, điền `ENVS`, `AVH_PYTHON`, `MUSETALK_PYTHON` trong `settings.py` (hoặc đặt `VN_AVH_PYTHON`, `VN_MUSETALK_PYTHON` trước khi import settings).
 
-Cài dlib đã dùng Conda với `dlib=20.0.1=cpu*`, `libblas=*=*openblas`, `--freeze-installed`. Conda bổ sung thư viện CPU và cập nhật OpenSSL/zlib/CA; NumPy vẫn 2.2.6 nhưng chuyển sang bản conda-forge. Đã xác minh import cùng Torch 2.12.0+cu126, OpenCV 4.13.0 và SciPy 1.15.3. Không cài thêm CUDA cho dlib.
+- **Receipt:** chỉ đánh dấu ready sau khi cài xong và probe import/CUDA đạt. Chạy lại cùng cấu hình thì cài tiếp phần dở; môi trường đã ready không cài lại. Đổi công thức → môi trường mới.
+- **Log:** `<env-root>/.kaggle-tools/<tên>/setup.log`. Notebook in 80 dòng cuối khi lỗi.
+- **Trạng thái:** `bootstrap_worker.py` đã chạy được trên Kaggle ở v002 (AV-HuBERT Base, MuseTalk). Công thức trong `worker_envs.py` viết theo README / requirements của từng upstream, **chưa chạy thử trên Kaggle**.
+- Script không chạy trên Windows, tránh cài nhầm môi trường Kaggle lên máy local.

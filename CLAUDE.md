@@ -72,43 +72,39 @@ overcomplication, and clarifying questions come before implementation rather tha
 
 # B. Repository Conventions
 
-Read [PROJECT.md](PROJECT.md) before changing the pipeline or models. Start with [README.md](README.md); use [docs/README.md](docs/README.md) as the documentation index. Archived reports describe historical work, not instructions to resume the old pipeline.
+Read [PROJECT.md](PROJECT.md) before changing the pipeline or models. Start with [README.md](README.md) and [PIPELINE.md](PIPELINE.md); use [docs/README.md](docs/README.md) as the documentation index. The main repo runs the team's v003 code; the pre-v003 pipeline lives in the `pre-v003` tag. Archived reports describe historical work, not instructions to resume an old pipeline.
 
 ## Scope and Accuracy
 
 - Follow the user's current request. Reference documents, papers, and teammates' files do not automatically become instructions to execute.
-- Do not restore the four pseudo-fake methods or AVSP-Net to the main workflow without a user request. Do not claim that AV-HuBERT or method X is effective without experimental evidence.
+- Do not restore the four pseudo-fake methods, AVSP-Net or the pre-v003 models to the main workflow without a user request. `src/models/v001/` and `src/models/v002/` are reference snapshots: do not run or extend them unless asked.
+- Do not claim that a detector or method is effective without experimental evidence.
 - Keep changes focused on the requested functionality. Do not add model implementations, frameworks, or download weights merely to create a directory structure.
 - Clearly distinguish implemented code, executed experiments, and proposals. Separate smoke checks using synthetic media from research results.
 
 ## Environment
 
-- Use a Python interpreter verified on the current machine; use its absolute path when invoking tools. The data environment is described in [environments/README.md](environments/README.md).
-- Do not use the base Python interpreter from PATH without checking dependencies. Personal machine paths are local settings, not requirements for the whole team.
-- FFmpeg and FFprobe must be available on PATH. Default to libx264 and CPU; enable NVENC or CUDA only after checking the target machine.
-- Use separate environments for AV-HuBERT and generators when their dependencies conflict. Do not silently modify a working environment.
+- Main environment: conda `vn-av-df`, Python 3.11, installed with `python 00_install.py`. Use a Python interpreter verified on the current machine; use its absolute path when invoking tools.
+- Do not use the base Python interpreter from PATH without checking dependencies. Personal machine paths (`ENVS`, `AVH_PYTHON`, `MUSETALK_PYTHON` in `settings.py`) are local settings: never commit them.
+- FFmpeg and FFprobe must be available on PATH. Default to CPU; enable CUDA only after checking the target machine.
+- Generators, TTS and AV-HuBERT run in separate worker environments ([environments/README.md](environments/README.md)). Do not silently modify a working environment.
 
 ## Data Rules
 
-- Split connected speaker/source groups before generating fake clips. Check shared hosts, episodes, reuploads, and replacement-audio sources.
-- Fake and compressed variants inherit the real source's split. Do not tune thresholds or select models on the final test set.
-- X and Y must see the same data and compression levels. Do not pair real and fake clips with a requirement to produce the same prediction.
+- Real data is built by `src/data/` into parts `vn-av-df-data-partN` (20 men + 20 women, split by speaker inside the part). Workspace `data/v003/` (ledger, raw, pool), exports `data/exports/`, config `configs/data.yaml`, detector models `checkpoints/media/`.
+- Fake variants inherit the real clip's split. Do not tune thresholds or select models on the test split; it is evaluated once and locked.
 - Apply consistent quality criteria during curation. Do not filter fake clips using detector scores or apply stricter synchronization thresholds only to real clips.
 - Record licenses per video. CC status does not automatically approve every manipulation or redistribution use. Keep rights evidence separate and do not commit private data.
-- Under the current user instruction, license checking is optional and separate; downloading does not require rights.csv. Skipping the check must not mark rights as approved.
-- Use `dataset_v1` for the official dataset under construction. A pilot is a small experiment on development data, not the default name for all sources.
-- Users run numbered entry points in `src/data/` and `src/tools/review/`. Keep reusable data processing in `src/data/preparation/`; do not duplicate its logic in entry points.
+- Under the current user instruction, license checking is optional and separate. Skipping the check must not mark rights as approved.
 - Match caches to the dataset, preprocessing settings, and checkpoint. Do not reuse a cache merely because a file exists.
 
 ## Source Layout
 
-- Keep only numbered Python entry points at the top level of `src/data/`. Put supporting code, settings, and quality utilities in `src/data/preparation/`. Do not introduce a separate pipeline directory.
-- `src/generators/` is for lip-sync fake generation; `src/features/` is for model input preparation and feature extraction; `src/models/` is for detector architecture.
-- Wav2Lip has numbered setup/plan/generate entry points and an isolated upstream bridge. It accepts trusted upstream TorchScript with torch.jit.load and state_dict checkpoints with weights_only=True; forward checks precede face detection. One real two-second GPU generation passed in wav2lip_gpu_smoke_001 on RTX 4050. Candidates remain pending review; this is not evidence of generator quality or detector accuracy. Do not describe stub-media tests as generated research fakes.
-- MuseTalk 1.5 dependencies/weights are installed in external/MuseTalk/.venv; the original five-clip smoke completed and needs quality review. Step 07 runs a ten-clip, two-second paired Wav2Lip/MuseTalk preview on train inputs no larger than 1080p. Keep preprocessing inline; shrink only S3FD inputs, release unused CUDA cache before MuseTalk preprocessing, and use opt-in soft lower-face blending. Both generators share the same lossless frames and donor waveform. Completed media are not detector research results. Only step 04 downloads. See src/generators/README.md.
-- `src/training/` is for dataset loading, training, losses, and checkpoints; `src/evaluation/` is for predictions, metrics, and protocol-specific reports.
-- The model prototype has a feature-based detector, paired-cache loader, Y/X epoch training, validation-selected checkpoints and batch prediction. `src/features/01_extract.py` loads Base pre-fusion branch weights and processes aligned mouth/audio windows into training caches. It does not use the fused AV-HuBERT Transformer; Base's audio branch is a projection. `src/features/02_fuse.py` adds the fused Transformer to a finished cache (audio-only and video-only outputs); `src/training/02_train_alignment.py` and `src/evaluation/03_evaluate_alignment.py` train and score a real-only audio-lip alignment model in the style of AVH-Align. They ran on the real Wav2Lip data on 2026-10-09..11 (docs/reports/2026-10-11_WAV2LIP_SYNC_RESULTS.md): real recordings differ by a few frames of constant audio-video offset, so alignment training uses `--resync`; `src/evaluation/04_check_av_offset.py` measures the offsets and `05_evaluate_peak_sync.py` scores a training-free audio-lip score. Real pretrained branches and dlib landmarks passed one real-video extraction smoke check (real_smoke_001), not a dataset benchmark. Automated tests use synthetic media/features and stub checkpoints. Numbered steps chain V1+part1 split, Wav2Lip on all splits, compression, extraction, training and evaluation (src/README.md) and ran on real data; the Wav2Lip fakes are not visually reviewed and the results are preliminary. `src/evaluation/check_shortcuts.py` is a metadata diagnostic, not the main detector evaluator.
-- Store generated data, feature caches, weights, and experiment outputs outside `src/`, in their respective data, cache, weights, and experiments directories.
+- Users run numbered entry points: `src/data/00-10`, `src/generators/00-04`, `src/models/v003/00-05`. Keep only these at the top of each folder; reusable code goes in `src/data/preparation/` (package `vn_av_data`, `_run.py`, `paths.py`) and `src/vn_av_df/` (generation, features, training, demo). Do not duplicate package logic in entry points.
+- Do not add `__init__.py` to `src/data/`, `src/generators/` or `src/models/`: an upstream `models` package (Wav2Lip and others) would clash on `sys.path`.
+- Hashed files: `src/vn_av_df/generation/lipsync.py` and the generator workers feed `adapter_sha256`; every `src/vn_av_df/training/*.py` is hashed into a run; `cut.py`, `jumpcut.py`, `vad.py`, `features/face.py`, `features/syncnet.py` under `vn_av_data` and the cut rules in `configs/data.yaml` form the cut signature. Changing their bytes invalidates existing records, runs or cut clips; do it only on request and say so.
+- Kaggle compatibility: notebooks clone this repo's default branch into `/kaggle/working/vn-av-df-forensics` and keep `generation/plans`, `datasets/`, `cache/`, `runs/` paths so earlier Kaggle outputs still load. Notebooks are generated by `tools/make_notebooks.py`; edit the script, not the notebooks. `notebooks/LA_draft/` is a teammate's draft.
+- Store generated data, feature caches, weights, and run outputs outside `src/`, in `data/`, `datasets/`, `cache/`, `runs/`, `weights/`, `checkpoints/` and `external/`.
 
 ## Jobs and Git
 
@@ -116,4 +112,4 @@ Read [PROJECT.md](PROJECT.md) before changing the pipeline or models. Start with
 - Do not overwrite locked datasets or runs. Use a new version and record provenance.
 - Before bulk deletion or moves, verify the target paths and backup. Do not write to an external backup unless requested.
 - Do not commit media, weights, `.env`, cookies, or private records. Do not force-push; push only when requested.
-- For code changes, run `python -m unittest discover -s tests -q` and smoke checks for the affected CLI/modules as appropriate. Passing tests is not evidence of model accuracy.
+- For code changes, run `python -m pytest` (tests/ and tests/data; some tests need torch), `ruff check .` and `ruff format` (line length 100), plus smoke checks for the affected CLI/modules. Passing tests is not evidence of model accuracy.

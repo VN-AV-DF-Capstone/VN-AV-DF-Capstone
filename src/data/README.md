@@ -1,95 +1,82 @@
-# Pipeline dữ liệu — mở file rồi Run
+# Pipeline dữ liệu real v003
 
-Chọn interpreter `vn_av_df` trong IDE một lần (máy hiện tại: `D:\Anaconda\envs\vn_av_df\python.exe`). Dùng **Run Python File**, chạy cả file. Các bước tự xác định root repo nên không cần paste lệnh/chuyển thư mục. Không dùng Run Selection cho các file này.
+Chạy ở **máy local**: từ danh sách URL YouTube ra **part** real (20 nam + 20 nữ × 15-20 clip = 600-800 clip, chia sẵn train / validation / test theo người). Part là đầu vào của bước sinh fake (`src/generators/`, `notebooks/generate.ipynb`).
 
-Sửa [preparation/settings.py](preparation/settings.py) khi đổi phiên bản, đợt tải/cắt hoặc tên reviewer. File này đang đặt `DATASET_VERSION = 'dataset_v2'` (đã commit), nên bước 01–05 và review chạy cho V2; đổi về `dataset_v1` nếu cần chạy lại cho V1. `dataset_v1` là bộ sơ bộ đã review và chia split. Tên phiên bản chưa có nghĩa đã khóa chất lượng/split. `download_001` của V2 đang có nguồn và file tải dở; xem [data/README.md](../../data/README.md) trước khi đổi danh sách nguồn.
+- Chạy từng lệnh, đọc kết quả in ra, từ điển thuật ngữ: [RUNBOOK.md](RUNBOOK.md).
+- Căn cứ các con số và luật: [docs/v003_data.md](../../docs/v003_data.md) (tổng quan tài liệu Ch.2, số người / clip Ch.3, pipeline Ch.4: chọn và cắt §4.1-§4.2, độ lệch tiếng-hình §4.3, lưu trữ §4.8; thí nghiệm Ch.5; lỗi và thay đổi Ch.6).
 
-| Thứ tự | File mở để Run | Đầu vào → đầu ra |
+Chỉ dùng video của chính mình hoặc đã được phép. Raw, clip và part là dữ liệu người thật: **không chia sẻ công khai**.
+
+## Cài đặt
+
+```powershell
+conda activate vn-av-df
+python 00_install.py                     # từ thư mục gốc repo: cài src/data/preparation + package chính
+python src/data/00_setup.py              # tải YuNet, Silero VAD, SFace, WeSpeaker, SyncNet v2
+```
+
+Cần Node.js trong PATH (yt-dlp dùng để tải YouTube).
+
+## Các bước
+
+| Bước | Lệnh | Làm gì |
 |---|---|---|
-| 01 | [01_collect.py](01_collect.py) | `data/sources/<dataset_version>/videos.csv` → `selected_videos.csv`; chuẩn hóa URL/ID, lấy danh sách trong playlist đã chọn, bỏ video trùng. Chưa tải media. |
-| 02 | [02_download.py](02_download.py) | `selected_videos.csv` → `data/raw/<dataset_version>/<download_run>/*.mp4` và `download_results.csv`. Tải hình + tiếng, không yêu cầu API key/rights.csv. |
-| 03 | [03_cut_clips.py](03_cut_clips.py) | Batch tải thành công → `data/real/<dataset_version>/` với clip, accepted/rejected CSV và log. Số nguồn được đọc từ kết quả tải. Cần VAD/YOLO/FFmpeg. |
-| 04 | [04_build_manifest.py](04_build_manifest.py) | Accepted CSV/media + nguồn đã chọn → `data/manifests/<dataset_version>/clips.csv`, giữ nhóm nguồn/kênh/tập/bản gốc. |
-| Review | [Các bước review](../tools/review/README.md) | Xem/nghe, phân công, gộp quyết định → `reviewed_clips.csv`. **Bổ sung speaker_id nhất quán xuyên tập trước bước 05.** |
-| 05 | [05_build_splits.py](05_build_splits.py) | Clip đã review + người/nguồn → `real_splits.csv`, kiểm tra leakage. |
-| 07 (trước generator) | [07_add_part1.py](07_add_part1.py) | `real_splits.csv` của V1 + `review.csv` của part1 → `dataset_v1/real_splits_multi_001.csv`. Chỉ đọc split V1 đã khóa; V1 vào train, người của part1 chia train/val/test, hai người chung kênh nằm cùng split. |
-| Generator | [Wav2Lip 00/01/02](../generators/README.md) | Có settings riêng vẫn chọn `dataset_v1`. Kiểm tra setup → lập plan cho cả train/val/test → tạo real/fake candidates. Fake chưa review bằng mắt. |
-| 06 | [06_compress.py](06_compress.py) | `candidates.csv` của run generator → mỗi clip real/fake nén CRF 23 và 32, kèm `media_pairs.csv` cho bước trích feature. Đọc `RUN_ID`/`DATASET` từ settings của generator, không theo `DATASET_VERSION`. |
+| 01 | `01_plan.py [--cookies-from-browser firefox]` | Đọc dòng mới trong `data/v003/inputs/urls.csv` (url, speakers = 1 / 2 / n, note), chọn video, loại video dọc / < 25 fps / < 720p / lồng tiếng / trùng. Chia **batch ≤ 20 giờ và ≤ 16 GB**. Gặp xác minh bot thì dừng ngay; chạy lại với `--cookies-from-browser firefox` |
+| 02 | `02_download.py [N]` | Tải batch (720p). YouTube đòi xác minh bot thì chạy lại với `--cookies-from-browser firefox` |
+| 03 | `03_cut.py [N]` | Cắt clip ứng viên 4-7 s, mép clip ở chỗ ngắt hơi (VAD). Nguồn `1`: 30-40 clip rải đều; `2`: tối đa 150 clip / video rải đều; `n`: cắt hết. Mỗi frame đúng 1 mặt, không chuyển cảnh, không jump cut. Đo độ lệch tiếng-hình (SyncNet) |
+| 04 | `04_identify.py [N]` | Gán clip vào speaker bằng mặt + giọng, nhận lại người đã có, gợi ý gộp. `--calibrate`: gợi ý ngưỡng sau vài chục người |
+| 05 | `05_review.py` | Trang duyệt http://127.0.0.1:8001: gộp / tách người, gán giới, **chọn 15-20 clip / người**. Dưới 15 clip: N để chờ batch sau |
+| 06 | `06_parts.py` | Gom người đã duyệt xong thành part 20 nam + 20 nữ, split 12 / 3 / 5 mỗi giới. Part tạo xong bị khoá; người dư chờ part sau |
+| 07 | `07_export.py N` | Xuất part N ra thư mục `data/exports/vn-av-df-data/vn-av-df-data-partN/` (không zip), **dịch tiếng cho khớp môi** theo độ lệch đo ở 03 |
+| 08 | `08_archive.py raw N`<br>`08_archive.py part N` | Zip raw batch N / part N vào `data/v003/archive/` |
+| — | *(bạn tự up)* | Up file zip vừa tạo + cả thư mục `data/v003/ledger/` lên Drive. Pipeline không tự up |
+| 08 | `08_archive.py raw N --uploaded`<br>`08_archive.py part N --uploaded` | Ghi vào ledger: zip đã lên Drive. Chưa chạy lệnh này thì 09 không cho xoá |
+| 09 | `09_clean.py raw N` / `part N` / `pool` | Xoá bản ở máy, chỉ khi đã `--uploaded`. `pool`: xoá clip không chọn của người đã duyệt xong / bị loại |
+| 10 | `10_status.py` | Toàn cảnh: batch, clip, người, part, dung lượng |
 
-## Điền videos.csv
+`[N]` = số batch (bỏ trống: batch đầu còn việc). Mọi bước dừng được bằng Ctrl+C, chạy lại thì làm tiếp.
 
-Mỗi dòng điền cột `url` bằng link YouTube. `video_id` có thể để trống, bước 01 tự lấy. Chấp nhận watch, youtu.be, shorts, live; link watch có `list=` vẫn chỉ là **một video**. Muốn lấy cả playlist, dùng `https://www.youtube.com/playlist?list=...`.
+## Thứ tự
 
-Các cột title/channel có thể để trống. `tier` là nhóm nguồn, ví dụ podcast, presentation, lecture; không phải giấy phép. `program_id`, `episode_id`, `canonical_source_id` dùng khi đã biết. Không điền chung một episode_id cho cả playlist gồm nhiều tập; không tự tạo speaker_id từ tên kênh.
-
-Ví dụ một dòng video (không phải dữ liệu đã được kiểm tra chất lượng/giấy phép):
-
-```csv
-video_id,url,title,channel,program_id,episode_id,tier,canonical_source_id
-,https://www.youtube.com/watch?v=JEgxmwvo7YY,,,,,podcast,
+```
+mỗi batch:  01 plan → 02 download → 03 cut → 04 identify → 05 review
+đủ người:   06 parts → 07 export N → up thư mục part lên Kaggle (private, bạn tự up)
 ```
 
-Bước 01 chỉ gọi mạng khi mở rộng playlist. Video riêng được chuẩn hóa ID/URL tại máy; title/channel sẽ để trống nếu bạn chưa điền. Playlist lỗi/rỗng sẽ báo lỗi. Các playlist có video trùng được gộp theo ID; metadata nhóm/tập mâu thuẫn phải sửa trước khi tiếp tục.
+Raw và part cùng một nhịp ở 08-09: **zip → up Drive → `--uploaded` → xoá**. Raw làm được ngay sau 04, không cần chờ duyệt.
 
-## Chạy lại và giới hạn
+```powershell
+# raw batch N
+python src/data/08_archive.py raw N              # zip → data/v003/archive/raw_batch_00N.zip
+#   up zip + data/v003/ledger/ lên Drive (tay)
+python src/data/08_archive.py raw N --uploaded
+python src/data/09_clean.py raw N
 
-Chạy lại 02 sẽ tiếp tục trong cùng DOWNLOAD_RUN: bỏ qua MP4 đã có cả hình và tiếng, tiếp tục file .part, thử lại video lỗi và cập nhật download_results.csv sau từng video. download_sources.csv khóa danh sách nguồn của đợt tải; khi đổi danh sách, dùng DOWNLOAD_RUN mới. Không chạy đồng thời hai bước 02 vào cùng một thư mục.
-
-Khi chỉ sửa danh sách đầu vào và chưa tải, có thể tạo lại selected_videos.csv bằng bước 01. Riêng V2 hiện đã có `download_001/download_sources.csv`; nếu danh sách selected thay đổi thì phải dùng DOWNLOAD_RUN mới. Với đợt cắt mới, đổi CUT_RUN; không đổi tên dataset chỉ vì thêm một đợt tải. Manifest clip/split đã tạo vẫn được bảo vệ, không tự ghi đè.
-
-Bước 03 dừng nếu batch còn video failed/pending. Bước 02 có --limit 1 để thử một video chưa hoàn tất; chạy bình thường sẽ xử lý phần còn lại. Mỗi bước do bạn chủ động chạy, không tự mở job tiếp theo. Kiểm tra giấy phép vẫn có ở `src/data/preparation/check_licenses.py`, nhưng không nằm trong chuỗi bắt buộc.
-
-Tải YouTube cần Node.js >= 22 trên PATH và yt-dlp[default] (gồm EJS); downloader bật Node tường minh. Python 3.10 hiện còn chạy được nhưng yt-dlp đã cảnh báo ngừng hỗ trợ trong tương lai; chưa thay môi trường Python của nhóm.
-
-Ngoài cùng `src/data/` chỉ có các file Python có số để chạy. `preparation/` chứa toàn bộ code hỗ trợ, settings.py và nhánh quality; không cần chạy lần lượt các file trong đó. Các bước feature/train/đánh giá nằm ở `src/features/`, `src/training/`, `src/evaluation/` ([bảng lệnh](../README.md)); model AVSP-Net/bốn pseudo-fake cũ ở backup, không phải phần còn chạy của luồng này.
-
-
-## Tham khảo khi cần chạy CLI riêng
-
-## Nguồn và quyền sử dụng
-
-Điền URL video/playlist vào `data/sources/<dataset_version>/videos.csv`. Bước 01 chuẩn hóa sang selected_videos.csv, tự lấy video_id; tier là nhóm nguồn tùy chọn. Giữ program_id, episode_id và bản gốc của reupload để rà leakage. File mẫu ở configs/templates/videos.csv.
-
-`python -m src.data.preparation.check_licenses --videos <videos.csv> --out <new-rights.csv>` cần API key local và gọi YouTube API. Công cụ ghi license metadata, các phạm vi sử dụng vẫn pending. Đây không phải phê duyệt pháp lý.
-
-Kiểm tra giấy phép là bước riêng tùy chọn theo yêu cầu hiện tại. Downloader không bắt buộc rights.csv và không tự đánh dấu đã duyệt. Nếu chủ động truyền --rights, công cụ mới kiểm tra research_allowed=yes, acquisition_allowed=yes và evidence_ref như trước.
-
-`python -m src.data.preparation.download --videos <selected_videos.csv> --out_dir <new-run> --dry_run` chỉ kiểm tra bảng, không dùng network. Bỏ --dry_run mới tải. download_results.csv ghi cả thành công/thất bại. Bước 03 có số yêu cầu batch tải thành công toàn bộ để tránh lặng lẽ bỏ video lỗi.
-
-## Cắt và gộp
-
-`python src/data/preparation/cut_clips.py --config <config.json>` dùng cutter đã giữ lại; xem `--help`. Input CSV cần filename, số dòng khớp expected_input_count. Bật GPU chỉ sau khi kiểm tra môi trường. Bước VAD/YOLO đã được thử trên một batch V2 nhỏ, chưa chạy hết nguồn mới.
-
-### Xem bản nhẹ rồi mới xuất master
-
-Với batch tải đã hoàn tất, đặt `PREVIEW_HEIGHT = 480` trong `03_cut_clips.py` rồi chạy file; preview sẽ nằm trong `.tmp/clip_previews/`. Với một batch con tự chọn, tạo config giống bước 03 nhưng đặt `preview_height: 480` và `output_root` vào thư mục tạm riêng (ví dụ `.tmp/v2_preview_batches`), rồi chạy `python -m src.data.preparation.cut_clips --config <preview-config.json>`. Bộ lọc VAD/khuôn mặt/cảnh vẫn chạy như cũ; clip được mã hóa ở 480p, CRF 30 và AAC 64k. Batch này ghi `preview_candidates.csv` và `review_decisions_template.csv`, **không** ghi `accepted_clips.csv`, nên bước 04 không nhầm bản xem thử với master.
-
-Xem/nghe từng preview, sao chép template thành CSV mới, điền `decision=keep` hoặc `reject` cho **mọi** `clip_id`. Sau đó chạy:
-
-```text
-python -m src.data.preparation.export_reviewed_clips --preview-batch <thu-muc-batch-preview> --decisions <review_decisions.csv> --source-dir <thu-muc-video-goc> --output-root <data/real/dataset_v2> --run-id <run-moi>
+# part N
+python src/data/08_archive.py part N             # zip → data/v003/archive/vn-av-df-data-partN.zip
+#   up zip + data/v003/ledger/ lên Drive (tay)
+python src/data/08_archive.py part N --uploaded
+python src/data/09_clean.py part N
+python src/data/09_clean.py pool                 # sau cùng: clip thừa của người đã duyệt xong
 ```
 
-Lệnh xuất lại chỉ các dòng `keep` từ video gốc bằng cấu hình master hiện tại (giữ độ phân giải nguồn, x264 CRF 18, AAC 128k); output mới có `accepted_clips.csv` để bước 04 dùng. Chỉ cần chuyển video gốc của các clip được chọn sang máy xuất master. Lệnh từ chối review thiếu dòng, `clip_id` lạ/trùng, decision trống hoặc output đã tồn tại. Giữ `preview_candidates.csv`, CSV quyết định và video gốc cho đến khi kiểm tra master xong. Chế độ thường của `03_cut_clips.py` vẫn xuất master trực tiếp.
+## Thư mục `data/v003/` (một thư mục cho mọi batch và part)
 
-`python src/data/preparation/build_manifest.py --add podcast "<batch>/**/accepted_clips.csv" <media-root> --out <clips.csv>` gộp accepted manifests và kiểm tra 1:1 clip/media. Có thể truyền nhiều `--add`. Kết quả chưa phải đã được review hay đã có speaker_id.
+| Đường dẫn | Nội dung | Giữ / xoá |
+|---|---|---|
+| `inputs/urls.csv` | danh sách URL | giữ |
+| `ledger/ledger.sqlite` | **sổ cái**: URL, video, lý do loại, batch, clip, độ lệch, speaker, quyết định duyệt, part, nơi lưu trên Drive. Kèm `backups/` (mọi bản, không tự xoá) và `csv/` (xem bằng Excel) | **giữ, up Drive mỗi lần archive** |
+| `raw/batch_XXX/` | video gốc + `videos.csv` | xoá sau khi lên Drive (`09_clean raw`) |
+| `pool/clips/`, `pool/faces/` | clip ứng viên, ảnh dải mặt | clip xoá theo part / pool; ảnh mặt giữ |
+| `registry/` | ảnh mặt đại diện mỗi người | giữ |
+| `archive/` | zip raw / part chờ up Drive (bước 08) | xoá cùng raw / part |
 
-## Review và split
+Part export nằm ngoài `data/v003/`: `data/exports/vn-av-df-data/vn-av-df-data-partN/`, xoá bằng `09_clean part N`.
 
-Giai đoạn sơ bộ hiện tại: người dùng xác nhận toàn bộ video có cùng một người nói. File Run `05_build_splits.py` chọn `PROTOCOL = 'source_disjoint_single_speaker'` và `SINGLE_SPEAKER_ID = 'spk_001'`. Bấm Run để tạo `real_splits.csv`: mã người được bổ sung trong output, không sửa file review; cùng nguồn, bản đăng lại hoặc chương trình/tập đã định danh vẫn nằm chung tập. Cột `split_protocol` ghi rõ đây là đánh giá trên cùng người, chưa đánh giá người chưa thấy. Nguồn trùng nội dung nhưng khác ID cần điền `canonical_source_id` trước khi chia; mã video khác nhau chưa bảo đảm nội dung độc lập.
+Cấu hình: [configs/data.yaml](../../configs/data.yaml). Đổi luật cắt sau khi đã có clip sẽ bị chặn (luật cắt phải thống nhất); thử luật mới trên workspace riêng: `$env:VNAV_DATA="data/v003_trial"`.
 
-Khi bổ sung người nói, dùng manifest/phiên bản mới, điền danh tính thật sự nhất quán và đổi `PROTOCOL = 'speaker_source_disjoint'`. CLI mặc định vẫn dùng quy tắc nghiêm ngặt này. Không ghi đè split sơ bộ đã dùng cho thí nghiệm.
+## Kiểm thử
 
-Xem [công cụ review](../tools/README.md). Rà clip và bổ sung `speaker_id` nhất quán xuyên nguồn; giữ cùng ID cho host ở các tập. `source_video` là ID nguồn, `canonical_source_id` liên kết bản đăng lại. `speaker_ids` có thể chứa nhiều ID cách nhau bằng dấu chấm phẩy nếu clip liên quan nhiều người.
-
-`python -m src.data.preparation.build_splits --input <reviewed.csv> --out <new-splits.csv> --ratios 0.7,0.15,0.15` yêu cầu decision=keep, speaker/source xác định. Có thể dùng `0.8,0.2,0` cho pilot phát triển. Không ép tách nhóm chung host để đạt tỷ lệ; nếu không đủ nhóm, lệnh dừng.
-
-Split output giữ nguyên metadata và thêm label=0, split, group_id. Generator phải dùng `inherit_variant_split` để kiểm tra nguồn real/audio và generator giữ riêng; adapter Wav2Lip đã gọi hàm này cho clip nguồn và audio thay lời.
-
-## Nén và thời gian
-
-`python -m src.data.preparation.compress --input_csv <masters.csv> --out_dir <new-run> --crfs 18,23` là ví dụ kiểm tra kỹ thuật, không chốt mức nén cho nghiên cứu. Input master real/fake cần clip_id, file_path, label, speaker_id, source_video, group_id, split; fake cần source_clip. Không dùng lại bản đã nén làm master.
-
-Output gồm config/hash input, variants.csv, summary.json và failures.csv khi có lỗi. Mỗi CRF tạo trực tiếp từ master bằng libx264, audio cùng chính sách AAC 16 kHz mono. Thư mục output đã tồn tại sẽ bị từ chối. Nén làm giảm một số khác biệt định dạng, không bảo đảm xóa toàn bộ dấu vết phụ.
-
-Trong `preparation/`, `timeline_contract.py` giữ mốc thời gian và common valid window; `media_checks.py` giữ phép đo media dùng chung. `preparation/quality/` là công cụ đo/lọc tùy chọn, không bắt pilot tái chạy mọi bước curation lịch sử.
+```powershell
+python -m pytest tests/data
+```

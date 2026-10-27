@@ -1,61 +1,36 @@
 # PROJECT.md — trạng thái hiện hành
 
-Cập nhật 12/10/2026; kết quả 09–11/10/2026 ở [báo cáo Wav2Lip](docs/reports/2026-10-11_WAV2LIP_SYNC_RESULTS.md). Hướng hiện hành: **lip-sync audio–visual tiếng Việt**, so X/Y trên protocol tách người/nguồn, generator chưa thấy và nén. `dataset_v1` gốc chỉ có một người (`source_disjoint_single_speaker`); từ 09/10/2026 được ghép với 575 clip đã duyệt của người 2 (part1) thành split 11 người `speaker_source_disjoint`. Nguồn mở rộng đang được thu thập riêng ở `dataset_v2`.
+Cập nhật 27/10/2026. Repo chính chuyển sang code **v003** thống nhất của nhóm (nguồn: `linhxm/vn-av-df-forensics` @ `b017a27`, đã gồm các bản sửa khi sinh fake trên Kaggle). Code trước đó giữ ở tag `pre-v003`.
 
-## Đã chuyển đổi
+## Phiên bản
 
-- Nhánh làm việc: `main`. Đợt chuyển đổi làm trên nhánh `codex/research-reset`, sau đó tiếp tục trên `claude/project-thread-qetcz4`; ngày 12/10/2026 nhánh này được fast-forward vào `main`, nên `main` chứa toàn bộ `codex/research-reset`. Giữ lịch sử Git và thay đổi trước dọn trong archive/backup.
-- Media, cache và population cũ đã được đưa ra khỏi workspace sau đối chiếu backup. Dữ liệu V1 đã được thu thập, cắt và review xong (18/09/2026).
-- Báo cáo, metadata và bằng chứng AVSP-Net cũ ở [legacy_avsp](docs/archives/legacy_avsp/README.md). Số đo cũ không áp dụng cho hướng mới.
-- Công cụ cắt/review/quality được giữ, cập nhật đường dẫn. Preview không còn import bộ feature AVSP-Net.
-- Split real theo nhóm người/nguồn được tách riêng, bỏ điều kiện đủ bốn fake. Có kiểm tra nguồn audio và generator giữ riêng cho biến thể.
-- Nén dùng media primitives được giữ lại, CLI mới dùng output bất biến, CRF tường minh, nhãn/split/provenance và log lỗi.
-- Đã tạo generators/features và bản detector/train_step/predict tối thiểu. Từ 09/10/2026 đã chạy với Wav2Lip, AV-HuBERT và dữ liệu thật; xem [src/README.md](src/README.md).
+| Phiên bản | Thời gian | Nội dung | Ở đâu |
+|---|---|---|---|
+| pre-v003 | 09/2026 - 26/10/2026 | dataset_v1 + part1 của người 2, Wav2Lip, AV-HuBERT Base, y_001 / align_002 / peak_sync_001 | tag `pre-v003`; kết quả ở [báo cáo 11/10](docs/reports/2026-10-11_WAV2LIP_SYNC_RESULTS.md), `experiments/` |
+| v001 | 16/09 - 10/10/2026 | Pseudo-fake FATE, so sánh ô 2×2 | `src/models/v001/` |
+| v002 | 11/10 - 14/10/2026 | MechFake + TriCue | `src/models/v002/` |
+| v003 | từ 18/10/2026 | Dữ liệu real mới, sáu ô, 6 generator + 7 nguồn giọng AI, baseline + M1 / M2 | `src/data/`, `src/generators/`, `src/models/v003/`, `src/vn_av_df/` |
 
-## Bảng tiến trình
+Model của pre-v003 (y_001, align_002, peak_sync_001) không đưa sang v003: baseline v003 đã có detector cùng loại (BL-M `avh_align`, BL-M/sup `avh_align_sup`) và điểm khớp không cần train (`speechforensics`, dùng trong demo khi chưa có checkpoint).
+
+## Bảng tiến trình v003
 
 | Hạng mục | Trạng thái |
 |---|---|
-| Kiểm tra giấy phép theo video | Có CLI lấy metadata và trạng thái pending; chưa gọi API trên nguồn mới. |
-| Thu thập / downloader tuyển chọn | Có file chạy 01/02; nguồn mới đã được tải và đưa qua cắt clip/review. Kiểm tra giấy phép vẫn là bước riêng. |
-| Cắt clip / manifest / review | Đã gộp đủ 2.252 quyết định của ba người: 1.143 Keep, 1.109 Reject, không còn uncertain; xuất reviewed_clips.csv. |
-| Chia split / quan hệ biến thể | Đã chạy bước 05 cho bộ một người: 786 train, 192 val, 165 test; 18 nhóm nguồn, protocol source_disjoint_single_speaker. Bước 07 (09/10/2026) ghép V1 với part1 thành `real_splits_multi_001.csv`: 1.718 clip, 11 người; V1 (1 người) và 3 người part1 ở train, val 3 người (179 clip), test 4 người (171 clip). Val/test nhỏ nên khoảng tin cậy rộng. |
-| Active-speaker / gom người tự động | Công cụ tùy chọn được giữ; chưa chạy lại model ngoài hoặc calibrate ngưỡng cho population mới. |
-| Nén real/fake | Đã nén 946 cặp của `wav2lip_multi_001` ở CRF 23 và 32, không lỗi (`data/compressed/dataset_v1/wav2lip_multi_001_crf23_32/`). |
-| Generator Wav2Lip/MuseTalk/ứng viên giữ riêng | Wav2Lip GAN run `wav2lip_multi_001` (09–10/10/2026): 946/950 cặp 2 giây trên cả ba split, 4 clip train lỗi không tìm thấy mặt; chưa review bằng mắt nhưng đã dùng cho nén/feature/train. MuseTalk 1.5 đã cài đủ và chạy xong smoke 5 clip. Bước 07 đã chạy `quality_10x2s_002`: 10 clip train × 2 giây, 1080p, chung frame/audio cho Wav2Lip GAN và MuseTalk; đủ 20 fake và 10 comparison, chờ review. Preprocessing vẫn inline; S3FD dùng ảnh nhỏ, tắt benchmark và giải phóng cache GPU thừa; ghép mềm vùng dưới mặt. 19 kiểm tra generator qua; chưa phải kết quả detector hay bằng chứng fake đủ tinh vi. Generator giữ riêng chưa tích hợp. |
-| AV-HuBERT | Có 01_extract: loader Base pre-fusion, xử lý miệng/audio cùng timeline và xuất cache/pairs.csv. Đã cài dlib CPU 20.0.1, nạp checkpoint và chạy một clip thật: cửa sổ 2 giây, 50 frame, không nội suy landmark, hai feature [50,768] hữu hạn. Kết quả ở cache/features/dataset_v1/real_smoke_001. Đã trích 1.843 dòng của run `wav2lip_multi_001` (09–11/10/2026); 49 mẫu lỗi (thiếu landmark hoặc nhiều mặt), lệch về train. 01_extract không dùng Transformer hợp nhất; 02_fuse thêm Transformer hợp nhất lên cache đó, đã nạp checkpoint thật. |
-| Detector Y và cải tiến X | Có detector, loader feature pairs, train/validation theo epoch và lưu checkpoint; X thêm consistency. Y (`y_001`) đã train trên Wav2Lip nhưng bắt vết mờ của generator; hướng chính hiện tại là điểm khớp tiếng–môi (model căn chỉnh và điểm không cần train), xem báo cáo 11/10. X chưa chạy. |
-| Final test và demo detector | Chưa thực hiện. |
-| Nguồn mở rộng `dataset_v2` | `src/data/preparation/settings.py` đặt `dataset_v2` (commit `4eb4308`, 28/09); `data/sources/dataset_v2/selected_videos.csv` và `data/raw/dataset_v2/download_001/` đã có. Theo `download_results.csv` (lần ghi cuối 26/09): 1.954 nguồn đã chọn, 966 downloaded, 80 failed, 908 pending, khoảng 182 GB; việc tải đang dừng. Chưa cắt/review/chia split V2. |
+| Dữ liệu real (`src/data/`) | Part1: 800 clip, 40 người (20 nam + 20 nữ), train 480 / validation 120 / test 200, xuất 20/10/2026. Theo [docs/v003_data.md](docs/v003_data.md) (22/10): 3 part = 120 người × 20 clip; mới sinh fake cho part1. |
+| Sinh fake (`src/generators/`) | Part1 xong 25/10/2026: 7.622 mẫu. 56/1.800 job lip-sync bị bỏ: 39 không thấy mặt, 17 lỗi generator chưa chạy lại. Code hiện tại đã có đường dự phòng cho các lỗi đó (Diff2Lip batch nhỏ hơn, S3FD cho VideoReTalking, crop dự phòng cho IP-LAP), chưa chạy lại. |
+| Trích feature, train, test (`src/models/v003/`) | Code có; chưa có kết quả lưu trong repo. |
+| Demo (`src/vn_av_df/demo/`, `notebooks/demo.ipynb`) | Code có; cần checkpoint đã train. |
 
-## Quyết định nghiên cứu
+## Quy tắc giữ nguyên
 
-- Giữ audio–visual làm trung tâm. Tìm tín hiệu hình ảnh hoặc âm đặc biệt là phân tích hỗ trợ.
-- Khởi đầu với backbone giữ nguyên và bộ phân loại nhẹ. Đo riêng chỉ hình ảnh, chỉ audio và kết hợp trước khi thêm cross-attention.
-- X/Y dùng cùng kiến trúc, các bản nén, dữ liệu và lịch train; X chỉ thêm yêu cầu nhất quán.
-- Chọn model/tham số/ngưỡng trên validation. Pilot đã dùng chọn cấu hình là dữ liệu phát triển.
-- Giữ một generator và mức nén cuối để đánh giá sau khi khóa phương pháp; không dò final test để chọn thắng lợi.
-- Quy mô, nguồn cụ thể, giấy phép và GPU còn phải được xác minh bằng pilot. Chưa có bằng chứng tiết kiệm 70% công data.
-
-## Pipeline đang chạy được
-
-URL video/playlist đã chọn → 01 thu thập danh sách → 02 tải → 03 cắt clip → 04 gộp manifest → các bước review + xác định người/nguồn → 05 chia split. Các file chạy có số ở src/data và src/tools/review; để chạy V2, đặt `DATASET_VERSION = 'dataset_v2'` trong `src/data/preparation/settings.py`. Thay đổi này đã commit. `dataset_v1` vẫn giữ manifest, clip và các run thử của giai đoạn sơ bộ. Generator Wav2Lip/MuseTalk có cấu hình riêng vẫn trỏ `dataset_v1`; không tự chuyển theo settings của pipeline data. Kiểm tra giấy phép tách riêng, hiện không chặn download.
-
-`src/data/preparation/compress.py` nhận master đã có nhãn/split để tạo bản nén. Từ 09/10/2026 có luồng nối sẵn V1 + part1 → Wav2Lip cả ba split → nén → feature → train → đánh giá (bảng lệnh ở [src/README.md](src/README.md)); đã chạy trên dữ liệu thật 09–11/10/2026 ([báo cáo](docs/reports/2026-10-11_WAV2LIP_SYNC_RESULTS.md)). Tất cả lệnh phải nhận dataset/đường dẫn mới, không lấy manifest từ archive làm mặc định.
-
-Hướng dẫn: [src/data/README.md](src/data/README.md), [review](src/tools/README.md), [DATA_PROTOCOL](docs/research/DATA_PROTOCOL.md).
-
-## Sau review 1: dữ liệu và dọn workspace
-
-- Tiếp tục nguồn mới trong `data/sources/dataset_v2/` và `data/raw/dataset_v2/<DOWNLOAD_RUN>/`; các bước sau sẽ sinh `data/real/dataset_v2/`, `data/manifests/dataset_v2/` theo cùng tên phiên bản. Không dùng thư mục `data/dataset/_V2` vì code hiện không đọc đường dẫn đó.
-- `download_001` đang khóa danh sách nguồn bằng `download_sources.csv`. Tiếp tục cùng danh sách thì giữ `DOWNLOAD_RUN`; nếu thêm/bớt nguồn trong `selected_videos.csv`, dùng run tải mới. Chưa chạy bước 03 khi `download_results.csv` còn failed/pending.
-- Không coi bất kỳ output generator V1 nào là dataset fake đã duyệt: các candidates còn `awaiting_visual_review` hoặc `pending`, kể cả `wav2lip_multi_001` đang dùng để train; `quality_10x2s_002` mới được kiểm tra kỹ thuật 40 video. Giữ run cần review trước khi dọn.
-- [Kiểm kê dọn dẹp 23/09/2026](docs/reports/2026-09-23_WORKSPACE_CLEANUP_AUDIT.md) phân biệt bản nguồn/nhãn phải giữ, media xuất để review có thể tái tạo, run thử cũ và cache. Chưa xóa dữ liệu trong lần kiểm kê đó; sau đó một số mục đã được dọn (media xuất cho review, run thử cũ, preview, `.tmp/`). Trạng thái hiện tại, kể cả vị trí clip part1, ở [data/README.md](data/README.md).
+- `src/vn_av_df/generation/lipsync.py` và các worker generator được băm vào provenance (`adapter_sha256`); `src/vn_av_df/training/*.py` được băm vào run. Sửa nội dung thì bản ghi / run cũ không còn khớp.
+- `src/data/preparation/vn_av_data/data/cut.py`, `jumpcut.py`, `vad.py`, `features/face.py`, `features/syncnet.py` và luật cắt trong `configs/data.yaml` thuộc cut signature: đổi thì bước 03 chặn clip đã cắt. `cut.py` không chạy `ruff format` vì lý do này.
+- Thư mục Output trên Kaggle giữ tên `vn-av-df-forensics/` và đường dẫn `generation/plans`, `datasets/`, `cache/`, `runs/` như cũ, để Output các phiên trước dùng tiếp được.
+- Notebook clone nhánh mặc định của repo này: thay đổi chỉ tới Kaggle sau khi đã merge vào `main`.
 
 ## Việc kế tiếp
 
-1. Tạo fake MuseTalk cho đúng các clip val/test của `real_splits_multi_001` và chấm bằng ngưỡng lấy từ val Wav2Lip: phép thử generator chưa thấy, cũng cho biết điểm khớp tiếng–môi có bị vết mờ của Wav2Lip chi phối không.
-2. Review bằng mắt một mẫu fake của `wav2lip_multi_001`.
-3. Rà nguồn trùng và quyền sử dụng; bổ sung người từ `dataset_v2` để test có nhiều người hơn. Tập test Wav2Lip hiện đã dùng nhiều lần khi phát triển, không còn là final test.
-
-[Báo cáo chuyển đổi](docs/reports/2026-09-13_REPO_RESET.md) ghi kiểm tra thực tế và giới hạn tại thời điểm reset. Cách chạy mới: [pipeline có số](src/data/README.md). Không tự mở full download/train từ kế hoạch này.
+1. Chạy lại 17 job lip-sync lỗi của part1 (chờ quyết định của nhóm).
+2. Trích feature và train baseline + M1 / M2 trên part1, test một lần.
+3. Sinh fake cho part2, part3.

@@ -1,0 +1,423 @@
+> Bản sao từ nhật ký nghiên cứu (`RESEARCH_WORKLOG/v003_model.md`, ngoài repo) ngày 23/10/2026. Sửa ở nhật ký rồi chép lại vào đây.
+
+# v003 · Model: phương pháp, huấn luyện, đánh giá
+
+Cập nhật 23/10/2026 (khảo sát phương pháp 15/10, research theo lớp 22/10, đội hình chốt 23/10). File 3/3 của v003:
+- [v003_data.md](v003_data.md): dữ liệu real, số người và số clip, độ lệch tiếng-hình.
+- [v003_generation.md](v003_generation.md): sáu ô, generator và giọng, số fake mỗi clip.
+- **v003_model.md** (file này): khảo sát phương pháp, lỗi của detector hiện nay, đội hình 4 baseline cài lại đúng code gốc + 2 model đề xuất, protocol và cổng, huấn luyện, đánh giá, W&B, demo.
+
+Phạm vi: detector cho benchmark lip-sync tiếng Việt v003, gồm 6 ô và 3 câu hỏi cho mỗi mẫu:
+- **visual fake?** (hình bị AI vẽ)
+- **audio fake?** (giọng AI)
+- **AV mismatch?** (tiếng và môi lệch nhau)
+
+cộng điểm tổng **AI?** = max(visual, audio) và định vị đoạn giả.
+
+Quy ước:
+- Số liệu lấy từ chính paper; khác điều kiện thì không so trực tiếp.
+- "Chưa tìm thấy" nghĩa là chưa tìm thấy tính đến ngày ghi, không khẳng định là chưa ai làm.
+- Kết quả v001 / v002 chỉ là **bằng chứng phụ**, vì test chỉ có 2-3 người.
+- Mức tin: **●** đo trên dữ liệu của mình · **✔** đọc từ paper gốc · **○** suy luận / ước lượng.
+
+Cách làm như v002: bài toán → lỗi X (lấy từ literature) → ngành khác giải X bằng Z → mang Z về, kèm đánh giá khả thi trên Kaggle 2×T4. Nguồn tìm: arXiv 2024-2026, CVPR / NeurIPS / ICME / ACM MM / EACL, Interspeech / ICASSP, tạp chí tiếng Trung (中国图象图形学报), luận văn tiếng Trung phồn thể (NCCU).
+
+---
+
+## 1. Toàn cảnh phương pháp
+
+| Phương pháp | Năm · nơi | Ý chính | Train trên | Kết quả nổi bật (theo paper) | Code |
+|---|---|---|---|---|---|
+| **AVH-Align** | CVPR 2025 | AV-HuBERT (Large, fine-tune VSR) cho feature audio / visual riêng → MLP 1024→512→256→128→1 chấm độ khớp từng frame; InfoNCE trên ±15 frame; điểm video = log-sum-exp(−Φ_ii) | **Chỉ real** | Bền với lối tắt leading silence, tốt nhất AV-Deepfake1M ở nhóm real-only. Train FakeAVCeleb → test AV-1M chỉ 57,7 AUC | ✔ (bit-ml) |
+| **SpeechForensics** | NeurIPS 2024 | AV-HuBERT Large **không fine-tune**; cosine audio / visual từng frame, lấy max theo độ lệch ±τ (τ≈15) | Chỉ real (không train detector) | FF++ 97,6, FakeAVCeleb 99,0 (Large) | ✔ |
+| **BioLip** (bản arXiv v5 đổi tên **LADDER**) | arXiv 2026 | Chỉ landmark môi (64 điểm), y-coordinate, 4 bậc động học (vị trí, vận tốc, gia tốc, jerk) + thống kê + tỉ lệ vùng → CNN-1D 302K tham số | AVLips (W2L, TalkLip, SadTalker) | LipSyncTIMIT zero-shot TB **0,927** (W2L 0,97 · VideoReTalking 0,96 · Diff2Lip 0,93 · **IP-LAP 0,82**); CRF40 còn 0,76; 7 ngôn ngữ TB 0,83 | Chưa thấy |
+| LIPINC / LIPINC-V2 | 2024 / 2025 | Bất nhất miệng theo thời gian; V2 dùng ViT + cross-attention | Lip-sync | LipSyncTIMIT TB 0,96 (CRF23) / 0,76 (CRF40) | ✔ |
+| LoCC | ICME 2026 | So từng frame với "frame phản thực" dự đoán từ frame lân cận; teacher-student; định vị tới frame | LAV-DF, AV-1M | Theo paper hơn LIPINC trên LAV-DF / AV-1M / FakeAVCeleb / KoDF | ✔ |
+| PIA | arXiv 2025 | Phoneme (WhisperX) + viseme (3D-CNN + EfficientNet) + độ mở môi + ArcFace theo thời gian | FakeAVCeleb, DeepSpeak | FakeAVCeleb AUC 99,8; DeepSpeak 98,1. **Pipeline phoneme chỉ tiếng Anh** | ✔ |
+| LipFD | NeurIPS 2024 | Phổ âm + chuỗi frame miệng, hai đầu | AVLips | Trong miền > 95 %; **chéo bộ ~0,54** (X-AVDT đo lại) | ✔ |
+| AV-Lip-Sync+ (≈ B-AVH của mình) | 2023 | AV-HuBERT + TCN đa tỉ lệ, có giám sát | Có fake | Mốc có giám sát | ✔ |
+| X-AVDT | arXiv 2026 | Đảo ngược diffusion (Hallo) lấy cross-attention AV | MMDF | Chéo generator 95,3 AUROC, nhưng **~1 phút / clip 16 frame** | Trang dự án |
+| KLASSify (hạng 3 AV-1M++ 2025) | 2025 | SSL audio + graph attention (kiểu AASIST) + đặc trưng hình thủ công | AV-1M++ | 92,8 AUC; định vị chỉ bằng audio IoU 0,35 | - |
+| Pindrop (hạng 1 định vị AV-1M++) | 2025 | Ensemble mạng chuyên biệt + định vị kiểu ActionFormer | AV-1M++ | Điểm định vị 67,2 | - |
+| XLS-R + AASIST (và XLSR-SLS, XLSR-Mamba) | 2022-2026 | SSL đa ngôn ngữ (128 ngôn ngữ, **có tiếng Việt**) + graph attention | ASVspoof | Mạnh trong miền, **yếu với hệ TTS chưa thấy** | ✔ |
+| POI-Forensics | 2022 | Học danh tính AV từ real, so với video tham chiếu của chính người đó | Chỉ real | Bền với video chất lượng thấp | ✔ |
+| AV-LMMDetect / Omni-Fake-R1 / ConLLM | 2026 | MLLM (Qwen2.5-Omni) fine-tune, có giải thích | FakeAVCeleb, MAVOS-DD | 85,1 % acc open-set (base 32,3 %) | Một phần |
+
+## 2. Lỗi của detector hiện nay (bằng chứng chính từ literature)
+
+| # | Lỗi | Bằng chứng | Phụ (v001 / v002) |
+|---|---|---|---|
+| X1 | **Học thuộc dấu vết pixel của generator đã thấy** | BioLip: Xception 0,93 → 0,67 khi nén; LipFD chéo bộ 0,54; MesoInception ≈ ngẫu nhiên với generator lạ | P2: W2L 0,98 → MuseTalk 0,55 |
+| X2 | **Lối tắt của dữ liệu** (leading silence, khác biệt nén / kích thước) | Smeu CVPR25: chỉ nhìn im lặng đầu clip đạt > 98 %; Fake-or-JPEG ECCVW24 | E6: nhánh artifact báo nhầm 79-100 % clip chỉ bị xử lý |
+| X3 | **Phụ thuộc ngôn ngữ** | BioLip: LipFD kém rõ trên tiếng Trung; PIA, TISAN chỉ chạy với phoneme tiếng Anh; AV-HuBERT pretrain bằng tiếng Anh | - |
+| X4 | **Sụp khi nén / nhiễu** | BioLip: mọi phương pháp giảm 0,17-0,25 ở CRF40; SAVe 0,77 ở c40 | - |
+| X5 | **Generator làm mượt theo thời gian** (IP-LAP, diffusion) | BioLip yếu nhất với IP-LAP (0,82 → 0,53 ở CRF40); X-AVDT: bộ dữ liệu cũ chủ yếu GAN | - |
+| X6 | **Gộp thẳng điểm "lệch tiếng" vào điểm "AI"** | AVH-Align / SpeechForensics chỉ đo độ khớp, nên lệch tiếng thật (sham) cũng bị báo; BioLip không chạy được khi tiếng bị thay | v001: sync-only báo nhầm 88 % sham |
+| X7 | **Không định vị được, hoặc định vị bằng vết nối** | Survey partial-spoof 2025 (bám vùng overlap-add); UMMAFormer từ LAV-DF sang AV-1M rơi 98,8 → 51,6 AP | - |
+| X8 | **Phát hiện giọng giả không tổng quát sang TTS lạ** | XLS-R+AASIST yếu với hệ chưa thấy; VietPrism: MiniMax EER 37 %, VoxCPM2 35 % | - |
+| X9 | **Điểm nền lệch theo người / danh tính** | POI-Forensics là cả một hướng dựa trên tham chiếu người; PIA dùng ArcFace theo thời gian | v002: AUC trong từng người 0,96, gộp 0,78 |
+| X10 | **Quá đắt cho quy mô lớn** | X-AVDT ~1 phút / clip; MLLM 7B không fine-tune được trên T4 | - |
+
+## 3. Cầu nối liên ngành
+
+| Ý tưởng (Z) | Ngành gốc | Giải lỗi | Trạng thái tìm kiếm |
+|---|---|---|---|
+| **Cost volume theo độ trễ + gộp 2D** (học tương quan rồi cho CNN 2D chạy trên trục thời gian × độ trễ, ước độ trễ bằng soft-argmin) | Stereo matching (GC-Net, PSMNet), optical flow (PWC-Net, RAFT) | X6, X7 | **Đặc trưng theo độ trễ đã có** (sửa 23/10, trước ghi "chưa tìm thấy" là sai): Feng et al. CVPR 2023 ✔ cho mỗi frame một phân bố trên 31 độ trễ (τ = 15), đưa vào Transformer tự hồi quy học trên real (bất thường = fake); SpeechForensics lấy max theo độ trễ. Chưa tìm thấy: CNN 2D + soft-argmin trên trục thời gian × độ trễ, học có giám sát với đầu mismatch tách khỏi AI |
+| **Residual upsampling (NPR) ở độ phân giải gốc của miệng** | Image forensics (Tan et al., CVPR 2024) | X1, X4 | Chưa tìm thấy cho vùng miệng lip-sync |
+| **Residual "phản thực" theo thời gian** (frame − nội suy từ hai frame lân cận) | Nội suy frame / phát hiện bất thường video | X5, X7 | LoCC (2026) đã làm dạng học teacher-student → v003 chỉ dùng như một luồng đặc trưng rẻ, **không nhận là ý mới** |
+| **Động học landmark môi** (vận tốc, gia tốc, jerk) | Biomechanics / speech motor control | X3, X4 | BioLip đã làm → dùng làm **baseline** |
+| **Học bất biến với xử lý lành tính** (augment đối xứng real / fake: nén lại, đổi cỡ, làm nét) | Domain generalization / anti-spoofing (RawBoost, codec augmentation) | X2, X4 | Phổ biến bên audio; v002 chưa làm (lỗi E6) |
+| **Chuẩn hoá theo người bằng clip tham chiếu** | Speaker verification (enrollment, score normalization), POI-Forensics | X9 | **Đã có cho deepfake AV**: POI-Forensics (CVPRW 2023 ✔, chỉ học real, so với video real của chính người đó), Referee (arXiv 10/2025 ✔, 1 clip tham chiếu, kiểm đồng bộ + danh tính, báo SOTA chéo bộ / chéo ngôn ngữ). Không nhận là ý mới; chưa tìm thấy bản kèm 3 đầu ra |
+| **SSL đa ngôn ngữ cho audio** (XLS-R có tiếng Việt) | ASR / anti-spoofing | X3, X8 | Chuẩn; dùng làm nhánh audio + baseline |
+| MLLM giải thích | Vision-language | Giải thích | Fine-tune 7B không vừa T4 → để sau, làm judge zero-shot |
+
+Ghi chú riêng cho tiếng Việt:
+- **Thanh điệu gần như không thấy trên môi.** Lỗi thanh điệu của TTS chỉ bắt được qua nhánh audio, không qua nhánh AV. Sync chủ yếu dựa vào nhịp đóng-mở miệng (môi khép ở /b/, /m/, mở ở nguyên âm), phần lớn không phụ thuộc ngôn ngữ.
+- **AV-HuBERT pretrain bằng tiếng Anh** (rủi ro X3); bản "vox" pretrain trên VoxCeleb2 có nhiều ngôn ngữ. Cách giảm rủi ro: các nhánh không phụ thuộc ngôn ngữ (trace, landmark); XLS-R cho audio; về sau có thể thay bằng XLAVS-R (đa ngôn ngữ).
+
+## 4. Đội hình model (chốt 23/10/2026)
+
+Đội hình cũ (15/10: 6 baseline + 3 đề xuất + 10 ablation, có bản cài lại khác paper như BioLip 20 điểm môi, AASIST-lite) đã thay bằng **4 baseline cài lại đúng code gốc + 2 model đề xuất + 3 ablation**: 9 cấu hình; giai đoạn đánh giá part 1 chạy 1 seed (9 lượt train), chốt thiết kế rồi mới chạy 3 seed (27 lượt). Căn cứ chọn: board kiến trúc `slides/v003/model_board.html` (research theo lớp 22/10) và trao đổi 23/10 (§13).
+
+Mỗi baseline trả lời một câu hỏi, vì 6 ô của v003 có giả hình, giả tiếng, giả cả hai và lệch tiếng thật (② sham). Hai baseline hình + đồng bộ (bản đề xuất ban đầu) để hở hẳn câu hỏi "audio fake?" và không tách được ② / ③.
+
+Mọi baseline đều có paper gốc (và 3 / 5 có code gốc); cột "Paper" là bản đã kiểm tên, tác giả, mã arXiv ngày 23/10.
+
+| Mã | Model | Câu hỏi | Paper | Code gốc | Ghi chú |
+|---|---|---|---|---|---|
+| BL-V | `lipinc_v2` · LIPINC-V2 | visual | Datta, Jia, Lyu, [arXiv 2504.01470](https://arxiv.org/abs/2504.01470) (2025, preprint); bản đầu LIPINC: [arXiv 2401.10113](https://arxiv.org/abs/2401.10113) | [skrantidatta/LIPINC-V2](https://github.com/skrantidatta/LIPINC-V2) (Keras) | port sang PyTorch đúng kích thước từng lớp; chỉ cho điểm video |
+| BL-A | `ssl_aasist` · XLS-R 300M + AASIST | audio | Tak et al., Odyssey 2022, [arXiv 2202.12233](https://arxiv.org/abs/2202.12233); AASIST: Jung et al., ICASSP 2022, [arXiv 2110.01200](https://arxiv.org/abs/2110.01200); RawBoost: [arXiv 2111.04433](https://arxiv.org/abs/2111.04433) | [TakHemlata/SSL_Anti-spoofing](https://github.com/TakHemlata/SSL_Anti-spoofing) (MIT) | fine-tune cả XLS-R như gốc, RawBoost algo 3 |
+| BL-M | `avh_align` · AVH-Align | mismatch / AI | Smeu et al., CVPR 2025 (highlight), [arXiv 2412.00175](https://arxiv.org/abs/2412.00175) | [bit-ml/AVH-Align](https://github.com/bit-ml/AVH-Align) | chỉ học real; khởi tạo từ checkpoint công bố |
+| BL-M/sup | `avh_align_sup` · AVH-Align/sup | AI | **cùng paper** (Smeu et al. 2025): baseline có giám sát do chính tác giả đặt tên "AVH-Align/sup", cùng đặc trưng + mạng Φ, loss BCE, Adam lr 1e-3 ✔ | như trên (`avh_sup`) | học có nhãn trên cả 6 ô: so công bằng về dữ liệu với M1 |
+| BL-Ens | `bl_ens` = max(BL-V, BL-A) | AI | gộp muộn hai detector đơn kênh: Khalid et al., ADGD @ ACM MM 2021, [arXiv 2109.02993](https://arxiv.org/abs/2109.02993) ✔ (soft / hard voting một model tiếng + một model hình; ensemble hơn cả đơn kênh lẫn đa kênh trên FakeAVCeleb) | - | không train; chuẩn hoá z-score theo real validation rồi lấy max (khác voting, xem §4.1) |
+| M1 | `trihead_v2` | cả 3 + AI | - | model chính (§5) |
+| M2 | `avh_align_plus` | mismatch + AI | - | nâng cấp trực tiếp BL-M trên cùng nền (§5) |
+
+Bỏ khỏi đội hình: `biolip` (không có code gốc, bản cài khác paper), `av_lipsync_plus`, `xlsr_aasist` (AASIST-lite), `avcv`, `mtn` (thành nhánh của M1), 10 ablation cũ. `speechforensics` chỉ còn cho demo khi chưa có checkpoint.
+
+### 4.1. Baseline: cài lại và khác biệt với code gốc
+
+Đã tải và đọc code gốc của cả 3 repo (23/10) trước khi cài; khác biệt nào cũng ghi ở đây và trong docstring của lớp tương ứng (`training/models.py`).
+
+**BL-M · AVH-Align** ✔ (code + checkpoint):
+- Φ = `FusionModel` gốc: chiếu riêng hình / tiếng 1024 → 512, ghép, MLP 1024 → 512 → 256 → 128 → 1 (LayerNorm + ReLU). Bản cũ trong repo **thiếu 2 lớp chiếu** (ghép thẳng 2048 → 512), đã sửa.
+- Loss InfoNCE: mỗi frame hình t so với 31 frame tiếng t−15…t+15, tiếng ngoài clip là vector 0 (như gốc, không mask). Điểm frame −Φ(v_t, a_t), điểm video log-sum-exp.
+- Công thức gốc: Adam lr 1e-5, ReduceLROnPlateau (×0,1, patience 5), dừng sớm 10, tối đa 500 epoch, batch 512 frame (checkpoint ghi `batch_size=512`).
+- Checkpoint công bố `AVH-Align_AV1M.pt` (train trên 45 k video real AV-1M, đặc trưng `self_large_vox_433h` = đúng encoder của v003). Đã kiểm 23/10: nạp vào `AlignMLP` của repo cho **điểm video giống hệt** `FusionModel` gốc, logit theo độ trễ lệch < 3·10⁻⁶ ●.
+- Khác gốc: khởi tạo từ checkpoint công bố rồi học tiếp trên real của v003 (giải X12: v003 chỉ có 360-480 real train / part, paper cho thấy 8,7 k mẫu đã tụt AUC); batch theo clip (8 clip ≈ 1.100 frame); loss trung bình thay vì tổng (Adam bất biến tỉ lệ); bỏ frame mất mặt.
+
+**BL-M/sup · AVH-Align/sup** ✔ (Smeu et al. 2025 tự đặt baseline này: "same features and alignment network as AVH-Align, but a classification loss", BCE, Adam lr 1e-3; train FakeAVCeleb → test AV-1M 69,0 AUC, tụt khi cắt im lặng đầu clip): cùng Φ; điểm frame Φ(v_t, a_t), điểm video s = log-sum-exp, loss cross-entropy trên (−s, s); Adam lr 1e-3, **batch 1 video**, 100 epoch, dừng sớm 10 (đúng `avh_sup`). Nhãn = AI? của video. Khởi tạo ngẫu nhiên như gốc. Thêm augment dịch tiếng −1…+2 theo protocol v003 (§7.1).
+
+**BL-V · LIPINC-V2** ✔ (code Keras):
+- Tiền xử lý đúng `utils.py` gốc: căn mặt `FaceAligner` 256 px (mắt trái ở 0,40), crop hộp môi 48-67 rồi resize 144 × 64; 5 frame liên tiếp có độ mở môi ≥ 1 % + 3 frame "cùng tư thế" (4 tỉ lệ môi / má lệch < 3 điểm phần trăm, sau mỗi frame chọn bỏ 3 frame); 7 ảnh hiệu |R_t+1 − R_t|.
+- Model đúng `model.py`: 2 vision temporal transformer (patch 8, d 128, 4 head key_dim 128, 2 lớp spatial + 2 lớp temporal, post-norm, LN eps 1e-3) → bản đồ 8 × 8 × 3; 3 attention chéo (softmax(QKᵀ/√192)V trên 2 trục cuối); CNN 64-64-128-128 (BN, MaxPool 2 rồi 4) → Dense 1024 → 1024 → 2 (lớp 1 = real). 4,59 M tham số ●.
+- Loss: cross-entropy + 5 × inconsistency loss. Paper: SSIM giữa mọi cặp frame trên lớp đầu của MSTIE, BCE với nhãn real. Bản công bố tính SSIM bằng numpy nên **không có gradient**; ở đây dùng SSIM toàn cục khả vi trên đặc trưng chiếu patch của nhánh RGB.
+- Công thức gốc: Adam lr 1e-3, epsilon 0,1, batch 64, 100 epoch.
+- Khác gốc: landmark lấy từ cache AV-HuBERT (cùng bộ dlib 68 điểm) thay vì chạy lại dlib trên mặt đã căn; hộp mặt để tính tỉ lệ lấy từ landmark (gốc dùng hộp dò dlib); clip không tìm được bộ frame theo luật gốc thì chọn theo luật dự phòng (gốc bỏ video, ghi `fallback` trong cache); ảnh chia 255 (gốc đưa 0-255); ảnh hiệu tính bằng số có dấu (gốc trừ uint8 nên tràn); nhãn = visual fake (BL-V là chuyên gia hình). Chỉ có điểm video → không có phép đo định vị.
+
+**BL-A · XLS-R + AASIST** ✔ (code, MIT):
+- Back-end AASIST đúng `model.py` gốc (LL 1024 → 128, max-pool 3 × 3, 6 residual block kiểu RawNet2, đồ thị phổ 42 nút + đồ thị thời gian, 4 HS-GAL có nút master, MGO 2 nhánh, readout). 0,45 M tham số + XLS-R 300M fine-tune toàn bộ.
+- Train đúng script DF: cửa sổ 64.600 mẫu (~4 s, ngắn hơn thì lặp), RawBoost algo 3 (chép `RawBoost.py`, MIT), Adam lr 1e-6, weight decay 1e-4, batch 14, cross-entropy trọng số [0,1 giả; 0,9 thật], 100 epoch; tiếng không chuẩn hoá; không che thời gian (fairseq `mask=False`).
+- **Lệch có lý do (25/10):** trọng số lớp lấy theo nguyên tắc của gốc, *trọng số lớp = 1 − tỉ lệ lớp trong train* (`class_weight: balanced`, mặc định). Con số 0,1 / 0,9 của gốc chính là nguyên tắc này trên ASVspoof 2019 LA (~90 % giả); part 1 chỉ 37 % mẫu có tiếng giả nên giữ 0,1 / 0,9 làm lớp giả còn ~6 % tín hiệu (1 : 15): đo part 1, AUC val ~0,44-0,57 sau 8 epoch, val loss (cũng có trọng số) giảm vì lệch về "thật" chứ không vì phân biệt, nên chọn checkpoint sai. Part 1 → 0,63 / 0,37. `class_weight: paper` giữ đúng 0,1 / 0,9.
+- XLS-R + AASIST chạy cả batch một lượt như gốc (BatchNorm của AASIST thống kê trên batch 14); bản cài đầu tiên gọi từng mẫu (batch 1) — lỗi cài đặt, đã sửa 25/10.
+- Khác gốc: XLS-R qua `transformers` (cùng trọng số `facebook/wav2vec2-xls-r-300m`, tắt SpecAugment); clip 4-7 s nên khi đánh giá trượt cửa sổ 4 s bước 1 s, điểm frame = max các cửa sổ phủ nó, điểm video = max; nhãn cửa sổ = có frame tiếng giả; AMP fp16 trên GPU; checkpoint chọn theo val loss.
+
+**BL-Ens**: hai model chuyên trách chạy riêng rồi lấy max sau khi chuẩn hoá theo real validation. Đây là cách gộp người đọc sẽ hỏi "sao không làm vậy cho đơn giản"; M1 phải thắng nó thì mới có lý do để gộp trong một model. Căn cứ: Khalid et al. 2021 ✔ dùng đúng loại baseline này (một model tiếng MFCC + một model hình, soft / hard voting) và thấy nó hơn cả detector đơn kênh lẫn đa kênh trên FakeAVCeleb. Khác: lấy **max** thay vì trung bình, vì nhãn AI? của v003 = max(visual, audio) và ③ / ④ chỉ giả một kênh (trung bình làm loãng điểm của kênh giả); z-score theo real validation để hai thang điểm so được với nhau (○, lựa chọn của mình).
+
+**Encoder AV-HuBERT** giữ **Large VoxCeleb2 + LRS3 fine-tune VSR, bản self-training** (`self_large_vox_433h`, lớp cuối): đúng checkpoint AVH-Align dùng để trích đặc trưng (README và `deepfake_feature_extraction.py` ở commit `55401de`). Sửa 23/10: `settings.py` trước đó tải nhầm `large_vox_433h` (bản không self-training) và worker thiếu `import hubert_asr` (nơi đăng ký kiểu `av_hubert_seq2seq` của checkpoint fine-tune), nên prepare lần 3 dừng ngay khi nạp model. Lưu ý (○): fine-tune VSR có thể làm lớp trên chuyên cho hình (Pasad 2021 thấy điều tương tự ở wav2vec 2.0); chưa dò lớp.
+
+## 5. Hai model đề xuất
+
+### 5.0. Tính mới so với công trình gần nhất (rà 23/10)
+
+Kết luận trước: **từng khối của M1 / M2 đều đã có trong literature**; cái mới nằm ở cách ghép và ở bài toán (tách "lệch tiếng" khỏi "AI", có ② sham làm đối chứng, trên lip-sync tiếng Việt). Báo cáo nên nói "kiến trúc kết hợp, mỗi khối được kiểm bằng ablation", **không** nói "kiến trúc mới hoàn toàn".
+
+| Khối | Gần nhất đã có | Phần của mình (chưa tìm thấy ở nơi khác) |
+|---|---|---|
+| Đặc trưng theo độ trễ (M1 nhánh sync, M2) | Feng et al. CVPR 2023 ✔: phân bố trên 31 độ trễ mỗi frame, Transformer tự hồi quy, chỉ học real; SpeechForensics: max theo độ trễ | xử lý ma trận thời gian × độ trễ bằng CNN 2D + soft-argmin (kiểu stereo, GC-Net), học có giám sát; M2 dùng Φ đã pretrain của AVH-Align làm hàm chấm |
+| Clip tham chiếu cùng người (M1) | POI-Forensics (CVPRW 2023) ✔, Referee (arXiv 2025) ✔ | điều kiện hoá bằng FiLM cho cả 3 đầu ra; ablation `no_ref` |
+| Thay đoạn tiếng tạo mẫu giả (M1, M2) | Astrid et al. ICASSP 2025 ✔: thay đoạn bằng đoạn của mẫu khác, **gán nhãn fake** | gán **mismatch = 1, AI = 0** (tiếng thật, chỉ lệch): dạy model rằng lệch ≠ AI |
+| Lệch tiếng thật như một loại riêng | Deshmukh et al. arXiv 2026 ✔: thêm lớp RARV-SMM (tiếng thật + hình thật lệch nội dung) làm phép thử | ② sham có mặt cả lúc train và test, có đầu mismatch riêng; báo nhầm trên sham báo riêng |
+| NPR (nhánh trace) | Tan et al. CVPR 2024 ✔ (ảnh toàn khung) | áp ở vùng miệng, độ phân giải gốc, kèm residual thời gian |
+| Trộn nhóm lớp SSL có trọng số học được | SUPERB (weighted sum) ✔; Lee et al. 2022 ✔ (lớp 5 XLS-R tốt nhất cho spoof) | dùng nguyên, không nhận mới |
+| Xoá thông tin người nói (ban đầu gradient reversal; từ 25/10 loss gây nhầm lẫn bị chặn) | Ganin & Lempitsky ICML 2015 ✔; Tzeng et al. ICCV 2015 ✔ (domain confusion); Alvi et al. ECCV-W 2018 ✔ (confusion loss); Dao et al. 2026 ◐ (ảnh hưởng danh tính trong spoof) | ý tưởng có sẵn; biến thể entropy bị chặn là chi tiết cài đặt, không nhận mới |
+| Gộp hai detector đơn kênh | Khalid et al. 2021 ✔ | là baseline (BL-Ens), không phải đề xuất |
+
+Những gì báo cáo **được** khẳng định (khi có số): (1) tách 3 câu hỏi visual / audio / mismatch cộng sham giảm báo nhầm "lệch thật = AI" so với BL-M / BL-M/sup (cổng 4, 7, `fpr_by_cell`); (2) M1 hơn gộp muộn BL-Ens (cổng 1), tức gộp trong một model có lợi; (3) đóng góp của từng nhánh (cổng 5, 6). Trượt cổng nào thì phần tương ứng không được nhận là đóng góp.
+
+Rủi ro bị hỏi:
+- "Cost volume theo độ trễ đã có" → đúng, trích Feng et al. 2023; phần khác là CNN 2D + soft-argmin, có giám sát, đầu mismatch riêng.
+- "Tham chiếu người đã có" → đúng, trích POI-Forensics, Referee; ở đây là một nhánh có ablation.
+- "Sao không so với Referee / Feng et al.?" → chưa có trong đội hình (Referee chưa thấy code; Feng et al. là phát hiện bất thường chỉ học real, cùng nhóm với BL-M). Ghi vào §12 nếu cần bổ sung.
+
+### M1 · TriHead-v2 (`trihead_v2`, 1,94 M tham số)
+
+```
+nhánh sync  = cost volume ±15 (chiếu học được + cos) → CNN 2D → soft-argmin, đỉnh, entropy → TCN
+nhánh trace = crop miệng 96×96 độ phân giải gốc → [ảnh, NPR, residual thời gian] → Conv3D ×3
+              ‖ động học môi (y, vận tốc, gia tốc) + tư thế đầu (yaw / pitch / roll + vận tốc) → TCN
+nhánh audio = XLS-R đóng băng, 3 nhóm lớp (1-4, 5-8, 9-12) trộn bằng softmax học được → 2 lớp attention
+tham chiếu  = 3 clip real cùng người → FiLM  [h·(1+γ)+β ‖ h − ref]
+đầu ra      : visual ← trace + sync · audio ← audio · mismatch ← sync + audio ; AI? = max(visual, audio)
+```
+
+So với TriHead cũ, gộp 6 sửa nhóm P1 trên board kiến trúc:
+1. **NPR đúng paper** (Tan et al. CVPR 2024 ✔): hiệu với pixel tham chiếu của ô 2 × 2 (bản cũ dùng trung bình 2 × 2 = residual làm mờ).
+2. **Luồng tư thế đầu** (LipDA, ICML 2026 ◐): lip-sync vẽ môi mới nhưng giữ đầu của câu gốc; tư thế từ solvePnP trên 6 landmark đã có trong cache (`mouth.pose`).
+3. **Trọng số học được trên nhóm lớp XLS-R** (Lee et al. 2022 ✔: lớp 5 tốt nhất; SLS ◐). Cache `ssl` giờ là [T, 3, 1024].
+4. **Gộp điểm top-5 frame** (`pool = "topk5"`): đoạn giả ngắn nhất 0,3 s ≈ 7 frame, top-10 % của 175 frame = 18 frame làm loãng ●.
+5. **Pseudo-fake thay đoạn tiếng** khi nạp clip real (p = 0,25): đoạn 0,3-3 s lấy từ clip real khác cùng người; nhãn mismatch = 1, AI = 0 (Astrid et al. 2025 ✔: AUC chéo bộ 61 → 80 %).
+6. **Xoá thông tin người nói** ở nhánh audio và trace (Dao et al. 2026 ◐: EER −17 %); λ tăng 0 → 0,3 theo lịch DANN. Ban đầu dùng gradient reversal; **25/10 đổi** sang: đầu người nói `LayerNorm → Linear` học nhận diện trên feature tách graph, phần mã hoá chịu λ·(ln K − entropy) qua đầu đó với trọng số đóng băng (bị chặn trong [0, ln K]). Lý do (part 1, epoch 1-3): CE người nói nhánh trace 10,5 → 28 (ln K ≈ 3,3), grad norm 89 → 900 bị cắt về 5 nên tác vụ chính gần như không học, val loss 1,63 → 11,1, AUC ai 0,953 → 0,876; nhánh audio vẫn ở mức ngẫu nhiên (3,3) như mong muốn.
+
+- Giải: X1, X4, X11 (trace + tư thế đầu), X6 (pseudo-fake, đầu mismatch riêng), X7 (top-5), X8 (nhóm lớp), X9 (tham chiếu + xoá người nói).
+- Ablation: `trihead_v2_no_sync`, `trihead_v2_no_trace`, `trihead_v2_no_ref`. Không bỏ nhánh audio vì nó là nhánh duy nhất nuôi đầu audio.
+
+### M2 · AVH-Align+ (`avh_align_plus`, 1,92 M tham số)
+
+```
+Φ = AlignMLP của AVH-Align, khởi tạo từ checkpoint công bố (học tiếp với lr 1e-5)
+cost volume C[t, δ] = Φ(v_t, a_t+δ), δ ∈ [−15, 15] ‖ kênh vị trí δ/15 → CNN 2D → soft-argmin, đỉnh, entropy
+‖ vận tốc môi + tư thế đầu → TCN → 2 đầu: ai, mismatch ; pseudo-fake thay đoạn tiếng (p = 0,25)
+```
+
+- Học có giám sát trên **cùng dữ liệu** với BL-M/sup → kết luận sạch: cùng nền Φ, hơn được vì (1) đọc cả dải độ trễ thay vì một độ trễ, (2) môi–đầu, (3) pseudo-fake.
+- Rẻ hơn M1, không cần crop miệng hay XLS-R.
+
+### Bảng cấu hình
+
+| Mã | Cấu hình | Tham số học ● |
+|---|---|---|
+| BL-V | `lipinc_v2` | 4,59 M |
+| BL-A | `ssl_aasist` | 0,45 M + XLS-R 300M |
+| BL-M | `avh_align`, `avh_align_sup` | 1,74 M |
+| M1 | `trihead_v2` · `_no_sync` · `_no_trace` · `_no_ref` | 1,94 M · 0,86 M · 1,58 M · 1,76 M |
+| M2 | `avh_align_plus` | 1,92 M |
+
+`settings.MODELS` (6) + `settings.ABLATIONS` (3); giai đoạn đánh giá part 1 chạy **1 seed (42)**, chốt thiết kế rồi mới chạy 3 seed (42, 43, 44). Encoder cần trích suy ra từ model (`prepare.encoders_for`): avhubert, mouth, lipinc, xlsr, wave.
+
+## 6. Protocol và cổng
+
+- Nhánh đánh giá: generator đã thấy / chưa thấy, giọng đã thấy / chưa thấy, người chưa thấy, định vị, lệch tiếng.
+- Báo riêng: full / partial, độ dài đoạn giả, ô sát chỗ nối và ô giữa đoạn.
+- Ba đầu ra chấm riêng: visual AUC, audio AUC, mismatch AUC, cộng điểm tổng "AI?" = max(visual, audio). Model một điểm (BL-V, BL-M) dùng cùng điểm cho mọi tác vụ để thấy nó thực ra bắt cái gì.
+- **Cổng** (đặt trước, ΔAUC kèm CI bootstrap theo người, `report.GATES`):
+
+| # | So sánh | Tác vụ | Tập |
+|---|---|---|---|
+| 1 | M1 − BL-Ens | AI? | toàn bộ test |
+| 2 | M1 − BL-V | visual | generator chưa thấy (LatentSync, Diff2Lip) |
+| 3 | M1 − BL-A | audio | giọng chưa thấy (VoxCPM2, viXTTS, F5 inpainting) |
+| 4 | M1 − BL-M/sup, M1 − BL-M | mismatch | toàn bộ |
+| 5 | M1 − M1 no_ref | AI? | toàn bộ (≥ 0,03) |
+| 6 | M1 − M1 no_sync (mismatch), M1 − M1 no_trace (visual) | | toàn bộ |
+| 7 | M2 − BL-M/sup, M2 − BL-M | mismatch | toàn bộ |
+
+  Báo nhầm trên ② sham báo riêng (`fpr_by_cell`). Trượt cổng nào thì báo đúng như vậy; không đổi cổng sau khi xem test.
+
+## 7. Huấn luyện
+
+| Hạng mục | Giá trị |
+|---|---|
+| Đặc trưng (bước prepare, Kaggle) | AV-HuBERT Large (25 Hz, kèm landmark dlib và hộp miệng), crop miệng độ phân giải gốc + tư thế đầu, 8 crop LIPINC-V2, XLS-R-300M 3 nhóm lớp, waveform 16 kHz. Từ 24/10 ba phiên mỗi part: **landmarks** (dlib, CPU, ~10 h, không tốn quota GPU) rồi song song **cpu** (mouth, lipinc, wave) và **gpu** (AV-HuBERT đọc landmark, XLS-R). Đo part 1: dlib dò mặt 86 % thời gian (7,1 / 8,3 s mỗi mẫu), nên phiên một-stage cũ ~9 h GPU gần như chỉ chờ CPU; hai stage cho kết quả trùng từng giá trị (test) |
+| Nhãn | theo từng frame (0,04 s) cho mọi đầu ra; partial cho thấy ranh giới thật / giả trong cùng clip |
+| Cân lớp | `pos_weights` cho từng tác vụ = số mẫu nhãn 0 / số mẫu nhãn 1 (kẹp trong 0,2-5) cho model dùng loss mặc định |
+| Công thức train | **mỗi baseline dùng đúng công thức của code gốc** (`model.train_options`, §4.1); M1, M2: AdamW lr 3e-4, weight decay 1e-4, batch 16, 30 epoch, patience 5 (M2: Φ học với lr 1e-5) |
+| Cân theo người | lấy mẫu train theo 1 / số clip của người đó (`speaker_balance`) |
+| Validation | AUC 4 tác vụ mỗi epoch; checkpoint chọn theo val loss |
+| Tài sản tải trước | XLS-R gốc (BL-A), checkpoint AVH-Align (commit `55401de`, BL-M và M2): `training/00_setup.py` hoặc `cli.model_assets` trong notebook train |
+| Train tiếp khi bị ngắt | `last.pt` sau mỗi epoch (model, optimizer, scheduler, AMP scaler, lịch sử, trạng thái ngẫu nhiên kể cả thứ tự lấy mẫu); chạy lại thì tiếp từ epoch sau, đổi cấu hình thì báo lỗi thay vì trộn; xong thì xoá `last.pt` |
+| Nguồn gốc | `runs/<RUN>/provenance.json` (dữ liệu, chữ ký cache, commit, tài sản) thay cho ledger: train không ghi vào ledger của data_pipeline |
+| Đo trước | `training/05_benchmark.py`: giây / bước, bộ nhớ GPU, ước giờ mỗi epoch và tối đa mỗi seed, trên cache thật hoặc tensor tổng hợp (`--synthetic`) |
+
+### 7.1. Augment dịch tiếng −1…+2 frame
+
+- Mỗi lần nạp mẫu, trượt chuỗi đặc trưng tiếng so với hình k ∈ [−1, +2] frame (dương = tiếng trễ), đều cho real và fake, **nhãn giữ nguyên**, frame ở mép bị bỏ. Không tạo file mới; mỗi epoch cùng một clip được nhìn với độ lệch hơi khác.
+- Mục đích: model **không được dựa vào việc "khớp đúng 0 frame"** để đoán real / fake, che phần sai số còn lại sau khi sửa độ lệch real (±1 frame), và bền với video ngoài đời vốn hơi lệch. Augment không dạy model nhận ra lệch thật: việc đó do ② sham, ③ voice, ⑤ donor đảm nhận (lệch **nội dung**, không chỉ trượt vài frame).
+- Căn cứ chọn biên độ (BT.1359, điểm 0 lệch ~1 frame, sai số đo, augment lớn có hại): v003_data §4.3.4.
+- Áp cho mọi model có giám sát dùng cả tiếng và hình (`avh_align_sup`, `trihead_v2` và ablation, `avh_align_plus`), **trừ `avh_align` không giám sát**: nó học "độ lệch 0 = cặp đúng" từ real, dịch tiếng làm sai chính thứ nó học. BL-V và BL-A chỉ một phía nên không áp. (Lỗi cũ đã sửa 18/10: trước đó augment chỉ chạy cho model có ảnh miệng.)
+- Thí nghiệm chọn biên độ để sau (§12).
+
+## 8. Đánh giá
+
+### 8.1. Chỉ số và phân rã
+
+- 4 tác vụ (AI / visual / audio / mismatch); **AUC là chỉ số chính** (không phụ thuộc tỉ lệ lớp). Kèm AP, EER, F1, FAR.
+- BL-Ens tính ở bước test từ `predictions-val.npz` / `predictions-test.npz` của BL-V và BL-A cùng seed (`evaluate.evaluate_ensemble`), có đủ phép đo điểm video, không có định vị.
+- Phân rã theo ô, generator, giọng, full / partial, đã thấy / chưa thấy, theo người (AUC trong từng người).
+- **AUC cân theo người** (`auc_speaker_balanced`, cột riêng trong `report.md`): AUC gộp với trọng số 1 / số file của người đó, để người 20 clip không lấn người 15 clip.
+- **Ref-norm**: chuẩn hoá điểm theo 3 clip real tham chiếu của chính người đó; bỏ clip tham chiếu **và mọi file sinh từ chúng** khỏi phép đo.
+- **CI bootstrap theo người** (người là đơn vị độc lập; full và partial cùng một lần chạy không độc lập).
+- Test chạy **một lần**, khoá bằng `test-lock.json`; ngưỡng và checkpoint chọn trên validation trước khi mở test; mean ± std qua 3 seed.
+
+### 8.2. Điểm vận hành: ngưỡng theo tỉ lệ báo nhầm
+
+- Layton et al. ✔: không có tỉ lệ fake : real đúng cho mọi trường hợp; tỉ lệ train, ngưỡng và tỉ lệ fake ngoài thực tế phải khớp nhau. Tăng real khi train làm giảm báo nhầm nhưng cũng giảm bắt fake; tỉ lệ chỉ dịch điểm cân bằng, không làm model giỏi hơn. Khuyên báo nhiều chỉ số (ROC, PR, FPR / TPR, điểm thô) và nhiều base-rate. Giới hạn: thí nghiệm của họ trên giọng nói.
+- Vấn đề cũ: ngưỡng **F1 tối đa trên validation** (~70 % fake) chỉnh cho môi trường "đa số là fake"; ngoài đời fake hiếm hơn nhiều → báo nhầm quá nhiều.
+- Hiện hành:
+  - ngưỡng **FPR 1 % / 5 %** trên real validation, báo TPR và FPR ở test;
+  - **precision khi fake chiếm 50 % / 10 % / 1 %** ngoài thực tế (tính lại từ TPR / FPR, không cần sinh thêm);
+  - FPR **riêng cho real và cho sham**;
+  - demo dùng ngưỡng FPR 5 %.
+- Độ chính xác FPR phụ thuộc số real ở test ○: 150-200 real / part; mỗi clip báo nhầm = 0,5-0,67 % ở 1 part, nên FPR 1 % chỉ đáng tin khi gộp nhiều part.
+
+### 8.3. Định vị đoạn giả
+
+- Trong clip (từ v002, thước đo sạch hơn vì so trong cùng clip): ô có điểm cao nhất có nằm trong đoạn không; AUC ô trong / ngoài đoạn; ô sát mép so với ô giữa đoạn.
+- Chỉ cho model có điểm theo frame (`frame_level`); LIPINC-V2 và BL-Ens chỉ có điểm video nên bỏ phần này. BL-A có điểm frame từ cửa sổ trượt 4 s (thô).
+- Chuẩn LAV-DF / AV-Deepfake1M (thêm 18/10, để so được với bài khác): **AP@IoU 0,5 / 0,75 / 0,95** trên mọi video test (video real chỉ góp báo nhầm), **AR@1/5/10** trung bình trên IoU 0,5-0,95. Đoạn ứng viên lấy từ các khúc frame vượt ngưỡng ở nhiều mức, bỏ trùng bằng NMS. Cách tạo ứng viên do mình chọn; muốn so số với một paper cụ thể thì kiểm lại cách họ tạo ứng viên.
+
+## 9. Log W&B
+
+Chốt 18/10: **chỉ cho quá trình train** (prepare, train, evaluate, report), project **private**, **không đẩy ảnh / video người thật**. Pipeline dữ liệu ghi ở ledger; bước sinh ghi ở `generation.json` / `records/`. Mục đích: log làm bằng chứng cho báo cáo, nên ghi đủ thứ quan trọng và tái lập được.
+
+| Bước (job_type) | Ghi theo thời gian | Ghi lúc kết thúc / artifact |
+|---|---|---|
+| `prepare` | tiến độ, mẫu / phút theo encoder | tỉ lệ frame hợp lệ; **kiểm chéo độ lệch tiếng-hình bằng AV-HuBERT** trên clip real (đối chiếu SyncNet ở bước dữ liệu); `extraction.json` |
+| `train` (mỗi model × seed) | mỗi epoch: loss tổng + từng đầu (frame / video), grad norm, lr, giây / epoch, VRAM, **AUC validation 4 tác vụ**, AUC validation theo ô / generator / giọng / kind | epoch tốt nhất, lý do dừng, giờ train, số tham số, có augment hay không; `best.pt` + `history.json` |
+| `evaluate` (một lần) | - | bảng tổng (AUC, AP, EER, F1, FAR), phân rã, theo người, ref-norm, định vị, ROC, histogram điểm theo ô; `evaluation.json` + `test-lock.json` + `metrics.json` + `predictions-test.npz` |
+| `report` | - | bảng AUC mean ± std theo seed, **các cổng + CI 95 %**; `report.md` + `gates.json` |
+
+Mỗi run ghi config (cấu hình, seed, hash dữ liệu / test-lock); run id lưu cạnh kết quả, chạy lại sau khi bị ngắt ghi tiếp đúng run. Bật trong notebook: `USE_WANDB = True`, secret `WANDB_API_KEY` (key tạo trong org `vn-av-df-capstone-org`), entity = team `vn-av-df-capstone` (23/10: key mới gắn với một org; để trống entity thì W&B ghi vào team mặc định của key và báo "cannot access this resource").
+
+**Bằng chứng nằm ở file local, W&B là bản sao** (bổ sung 23/10 theo checklist NeurIPS mục 6-8, ML Reproducibility Checklist v2.0 của Pineau, Model Cards): W&B lỗi thì chỉ cảnh báo và chạy tiếp.
+
+| Mục checklist | Ghi ở đâu |
+|---|---|
+| Môi trường phần mềm / phần cứng (Python, torch, CUDA, cuDNN, cờ tất định, GPU, driver, gói chính) | `provenance.json` (train), `extraction.json` (prepare), `benchmark.json`, `generation.json` (mỗi phiên sinh) |
+| Dữ liệu bị loại / xử lý khác luật gốc | tỉ lệ frame hợp lệ (avhubert, mouth); **tỉ lệ clip LIPINC theo luật dự phòng** theo ô (`extraction.json` của lipinc) |
+| Cách chọn siêu tham số | `provenance.json: hyperparameter_search = null` + câu trong `report.md` (không dò; baseline theo code gốc; M1 / M2 đặt trước) |
+| Nguồn biến động của CI, số lần chạy | mục "Cách đọc" đầu `report.md` (số seed, bootstrap theo speaker 1.000 lần, phân vị 2,5-97,5 %, không gồm biến động do khởi tạo khi chạy 1 seed) |
+| Kết quả phân rã theo nhóm nhân khẩu học | `breakdown` thêm `gender/F`, `gender/M` (dương và real cùng giới) |
+| Compute mỗi lần chạy + tổng, kể cả phiên hỏng | giờ train (`history.json`), thời gian trích (`extraction.json`), phiên sinh (`generation.json`, thêm generator dừng và lý do); tổng hợp tay ở §11.1 |
+
+## 10. Demo (Kaggle, Gradio)
+
+- **Chọn Kaggle** thay Colab: 2×T4 / P100 ổn định, quota 30 giờ / tuần, gắn sẵn dataset checkpoint và weight, dùng lại công thức cài worker; Colab hay bị ngắt.
+- **Tab 1, tạo fake từ video real**: video ≤ 60 s → ô ③ / ④ / ⑤ (tải thêm tiếng thật khác) / ⑥, full hoặc partial (đoạn tự chọn), generator (mặc định Wav2Lip + LatentSync 1.5), giọng (mặc định F5-TTS VN), câu mới cho cụm sửa → video fake + nhãn thật. Dùng đúng hàm của pipeline sinh.
+- **Tab 2, phân tích**: chuẩn hoá → **đo và sửa độ lệch tiếng-hình bằng SyncNet** (báo riêng "lệch thời gian ≈ X ms" nếu vượt ngưỡng BT.1359) → đặc trưng như lúc train → mỗi model chạy theo cửa sổ 7 s (model train trên clip 4-7 s) → điểm 4 tác vụ, kết luận theo ngưỡng FPR 5 %, timeline vẽ chồng nhãn thật. Thêm 1-3 video real cùng người làm tham chiếu (TriHead).
+- Chưa có checkpoint: `RUN_DIR = None` → chỉ chạy `speechforensics` (không cần train) để thử luồng.
+- Giới hạn 60 s (bộ trích AV-HuBERT). Link `gradio.live` công khai trong lúc chạy: chỉ dùng video được phép, tắt khi xong.
+- Chạy ở máy Windows: cần xuất AV-HuBERT ra ONNX / TorchScript (không cần fairseq), crop miệng chuyển sang lấy vị trí từ YuNet (để sau).
+
+## 11. Triển khai và trạng thái kiểm
+
+- Code: `src/vn_av_df/training/` (prepare, data, models, train, evaluate, report, rawboost), `features/encoders.py` (XLS-R nhóm lớp, crop miệng + tư thế đầu, khung LIPINC-V2, waveform), `features/avhubert*.py`, `tracking.py` (W&B), `demo/`; script `training/00-04_*.py`; notebook `notebooks/{prepare,train,demo}.ipynb` (sinh bằng `tools/make_notebooks.py`, không sửa tay). Môi trường worker: `environments/`.
+- Khác code gốc khi cài lại: §4.1.
+- **Đã kiểm (23/10):** 52 test trên dữ liệu tổng hợp (thêm: ngắt giữa epoch rồi train tiếp đúng epoch, provenance, benchmark), trong đó forward / backward cả 10 cấu hình (gồm XLS-R tí hon cho BL-A); train → test → BL-Ens → report end-to-end cho cả đội hình; luật chọn frame LIPINC-V2 (luật gốc + dự phòng); NPR theo định nghĩa pixel tham chiếu; gradient reversal; pseudo-fake; encoder LIPINC / waveform / tư thế đầu trên video tổng hợp; demo với LIPINC-V2 (khung không theo frame) và M2. **AVH-Align: nạp checkpoint công bố cho điểm giống hệt `FusionModel` gốc** ●. Ruff sạch.
+- **Chưa kiểm** (cần GPU + Internet thật): AV-HuBERT Large, XLS-R thật (trích và fine-tune), train thật, thời gian / bộ nhớ của BL-A trên T4, tỉ lệ clip LIPINC rơi vào luật dự phòng trên dữ liệu thật, demo với checkpoint thật.
+
+### 11.1. Nhật ký compute (checklist NeurIPS mục 8: kể cả phiên hỏng)
+
+Giờ phiên là thời gian chạy của phiên (Kaggle T4 × 2 chạy song song 2 job, nên giờ GPU ≈ 2 × giờ phiên). Thêm một dòng cho mỗi phiên mới.
+
+| Ngày | Việc | Máy | Giờ phiên | Kết quả | Nguồn |
+|---|---|---|---|---|---|
+| 20-23/10 | Part 1 · phiên giọng (9 phiên) | Kaggle T4 × 2 | 5,4 | 800 job giọng xong (tính cả job làm lại) | `generation.json` |
+| 20-23/10 | Part 1 · phiên lip-sync (15 phiên, trong đó 1 phiên rỗng 0 s và 1 phiên 10 phút bỏ 12 job, 0 xong) | Kaggle T4 × 2 | 49,2 | 1.409 lượt job xong (tính cả VideoRetalking làm lại do adapter cũ), 56 job bỏ ở bản cuối | `generation.json` |
+| 23/10 | Giây / job đo được (trung bình theo phiên) | Kaggle T4 | - | Wav2Lip 46 · MuseTalk 117 · IP-LAP 211 · VideoRetalking 342 · LatentSync 296 · Diff2Lip 186 · giọng 34-79 | `generation.json` |
+| 23/10 | Cắt 0,4 s cuối 7.622 file part 1 (`trim_part1.py`) | Local CPU 16 luồng | 1,4 | xong, 0 cờ lối tắt | output script |
+| 23/10 | Kiểm thử code sau khi gộp nhánh sinh (61 test) | Local CPU | 1,5 | 61 / 61 qua | pytest |
+| 23/10 | Prepare P1 lần 1 | Kaggle T4 × 2 | 0,13 | **hỏng**: W&B từ chối key (chưa trích mẫu nào) | log Kaggle |
+| 23/10 | Prepare P1 lần 2 | Kaggle T4 × 2 | 0,16 | **hỏng**: key đúng nhưng ghi vào team mặc định không có quyền | log Kaggle |
+| 23/10 | Prepare P1 lần 3 (entity `vn-av-df-capstone`) | Kaggle T4 × 2 | ~0,3 | **hỏng**: worker AV-HuBERT không nạp được checkpoint fine-tune (`Could not infer model type av_hubert_seq2seq`; thiếu `import hubert_asr`), checkpoint cũng là bản nhầm `large_vox_433h` | log Kaggle |
+| 23-24/10 | Prepare P1 lần 4 (sửa import + `self_large_vox_433h` + worker nạp lần lượt) | Kaggle T4 × 2 | ~0,3 | **hỏng**: nạp model được (2,6 GB / GPU), nhưng bước kiểm của mình đọc `stack_order_audio = 1` từ task của checkpoint VSR (fine-tune chỉ trên hình) thay vì kích thước đầu vào tiếng của encoder (104 = 26 × 4) | log Kaggle |
+| 24/10 | Prepare P1 lần 5 (kiểm theo đầu vào tiếng của encoder, như AVH-Align cố định stack 4) | Kaggle T4 × 2 | ~9 | **dừng ở 7.592 / 7.622 mẫu avhubert**: RAM trống tụt ~6 GB/giờ (rò trong worker AV-HuBERT), worker bị giết (-9) và treo 2 × 30 phút (mất ~2 h); tốc độ khi không đứng 17-18 mẫu/phút (CPU: dlib dò mặt mỗi frame); lỗi ở mẫu đầu tiên bỏ cả nhóm clip; lipinc, wave chưa chạy | notebook tải về |
+| 24/10 | Sửa: worker mở lại sau 300 mẫu và mở lần lượt, mẫu lỗi thử lại ở cuối (không bỏ cả nhóm), log RAM tiến trình chính / con | – | – | 66 test qua | pytest |
+| 24/10 | Tách prepare: stage `landmarks` (dlib, CPU) riêng khỏi stage model AV-HuBERT (GPU) | Local CPU | – | 69 test qua (hai stage trùng từng giá trị với một stage) | pytest |
+| 24/10 | Prepare P1 lần 6 · phiên CPU (`landmarks`, `mouth`, `lipinc`, `wave` trong một phiên) | Kaggle CPU 4 nhân | ~0,8 | **dừng chủ động** ở ~600 / 7.622 mẫu landmarks: ~13 mẫu/phút, bằng lần 5 (lần 5 trung bình cả phiên ~14 mẫu/phút, 17-18 chỉ là lúc đầu), nên riêng landmarks ~10 h, cả phiên ~11-12,5 h dễ vượt giới hạn 12 h; worker dlib rò ~1 GB/giờ mỗi worker (mở lại sau 1.000 mẫu thì RAM trống còn ~5 GB). Đổi thành ba phiên (`SESSION`), `restart_every` landmarks 300. Đo trên part 1: dlib dò 56 % số frame (sham, voice dùng lại frame của real; source, donor, both kể cả partial phải dò lại) | log Kaggle |
+| 25/10 | Train P1 T-A lần 1 (`ssl_aasist`, seed 42) | Kaggle T4 (1 GPU) | ~0,26 | **hỏng** sau epoch 1: grad norm NaN (AMP tràn số ở bước đầu, bước đó scaler đã bỏ qua) làm ghi `history.json` lỗi. Đo được: ~11 phút / epoch (train 303 batch 8,0 phút, val 76 batch 2,8 phút), tối đa 100 epoch ≈ 18 h > 12 h; GPU 12,8-13,7 / 15 GB; RAM trống giảm ~5 GB trong epoch 1 (theo dõi). Sửa: chỉ lấy norm hữu hạn + đếm bước tràn, `MAX_HOURS` 11 dừng sạch sau epoch rồi phiên sau train tiếp | log Kaggle |
+| 25/10 | Train P1 T-A lần 2 (`ssl_aasist`) | Kaggle T4 (1 GPU) | ~0,5 | **hỏng** giữa epoch 2: CUDA hết bộ nhớ (14,56 GB). Epoch 1: 15,1 phút (train 9,6, val 2,7, chấm AUC ~2,8), AUC val ai 0,453; RAM chính tăng đều ~0,6 GB/phút (2,3 → 10,8 GB), GPU 7,4 → 14,5 GB. Nguyên nhân (tái hiện local, ~16 MB / bước): điểm frame ghi đè bằng `max` vào tensor còn gắn graph không bao giờ backward → vòng tham chiếu trong autograd giữ bộ nhớ. Thêm: model gọi XLS-R + AASIST **từng mẫu (batch 1)** nên BatchNorm của AASIST chỉ thống kê trên 1 mẫu, khác gốc (batch 14). Sửa: detach điểm frame (rò hết, đo local), gom mọi cửa sổ của batch một lượt (đúng gốc; khi chấm trùng cách cũ, test), `empty_cache` sau lượt chấm, `expandable_segments`; 2 GPU chạy 2 lane song song (`LANES`) | log Kaggle + script local |
+| 25/10 | T-B lần 1 (M1 + 3 ablation) | Kaggle T4 | ~0,3 | **dừng tay**: >17 phút không in gì sau khi tải model (đọc ~30 nghìn file chữ ký cache tuần tự); sửa đọc song song + in tiến độ | log Kaggle |
+| 25/10 | Train P1 phiên lane đầu (1 notebook, T4 × 2: GPU0 BL-A, GPU1 8 model) | Kaggle T4 × 2 | ~1,4 | **dừng chủ động**. Ổn định: RAM / VRAM đứng yên (BL-A 2,2 GB / 10,3 GB, M1 2,0 / 3,2 GB). BL-A 9,5 phút / epoch (train nhanh ×1,7 nhờ gom batch), AUC audio 0,44 → 0,57 sau 8 epoch (trọng số lớp 0,1 / 0,9). M1 15-31 phút / epoch; epoch 2 tốt nhất (AUC ai 0,953, visual 0,982, audio 0,964, mismatch 0,988), epoch 3 vỡ do đối kháng người nói nhánh trace (xem §5 mục 6). Sửa: BL-A `balanced`, M1 loss gây nhầm lẫn bị chặn; chia 2 notebook `-ta` / `-tb` | log Kaggle + W&B |
+
+## 12. Hạn chế và việc mở (phần model)
+
+**Hạn chế:**
+1. BL-M có ít real hơn nhiều so với paper gốc; đã giảm bằng cách khởi tạo từ checkpoint công bố (45 k real AV-1M) (§4.1).
+2. AV-HuBERT pretrain tiếng Anh; thanh điệu không thấy trên môi.
+3. Chưa có bản test nhiễu thực tế (v003_data §7.4), nên chưa có phép đo M1 / BL-V ở CRF cao.
+4. Ngưỡng FPR 1 % đo trên 150-200 real / part còn thô.
+5. BL-V và BL-Ens chỉ có điểm video: không so định vị được với chúng.
+
+**Việc mở:**
+
+| # | Việc | Ghi chú |
+|---|---|---|
+| 1 | Prepare + train + test part 1 thật | sau khi sinh xong; ghi tỉ lệ `fallback` của cache lipinc |
+| 2 | Thí nghiệm biên độ augment lệch tiếng (không / ±1 / −1…+2 / ±3) | AUC test + đường báo nhầm khi real bị dịch k = −3…+3; chọn mức nhỏ nhất mà báo nhầm trong vùng chấp nhận không tăng và AUC không giảm |
+| 3 | Chấm trên bản test nhiễu thực tế | |
+| 4 | Xuất AV-HuBERT ra ONNX cho demo local | |
+| 5 | Hiệu chuẩn điểm (temperature scaling / isotonic) | việc mở từ v002 |
+| 6 | Test ngoài (AVLips, FakeAVCeleb, LipSyncTIMIT) | sau khi khoá phương pháp |
+| 7 | Đo bộ nhớ / thời gian thật (`training/05_benchmark.py`) trên T4 và RTX 4090 | BL-A không vừa T4 thì giảm batch, giữ lr gốc |
+| 8 | Chấm thêm checkpoint LIPINC-V2 công bố (Keras, zero-shot) | cần chuyển trọng số hdf5 sang PyTorch |
+| 9 | Dò lớp AV-HuBERT cho sync (board: "Dò lớp AV-HuBERT") | chỉ cần một lần trích |
+| 10 | Cân bằng tải giữa notebook train `-ta` / `-tb` (part 1, 25/10: `-tb` xong rất sớm, `-ta` còn M1 và BL-A chạy lâu) | Phân biệt **vốn nhanh** (BL-M ~9 s / epoch, chỉ 480 clip real) với **dừng sớm** (3 ablation M1 cùng tốc độ ~15 phút / epoch như M1 nhưng dừng ở epoch 10-13 do patience 5; M1 vẫn cải thiện nên chạy lâu hơn; BL-A patience 10, tối đa 100 epoch). Thời gian một model ≈ phút / epoch × số epoch tới khi dừng sớm, nên chia lane theo ước tính đó; tốt hơn: hàng đợi chung, GPU nào rảnh lấy model kế tiếp (chưa làm) |
+| 11 | Rò tham chiếu ở val / test (`enrollment` không loại clip gốc của chính mẫu; train thì loại) | 15 % mẫu val (160 / 1.052) và test (352 / 2.336). Ảnh hưởng M1, `no_sync`, `no_trace`. Trên val ảnh hưởng nhỏ: `no_ref` (không tham chiếu) đạt AUC ai 0,982 ≈ M1 0,983. **Đã sửa 25/10** (chỉ phần chấm, không train lại: `no_ref` 0,982 ≈ M1 0,983 cho thấy chọn checkpoint gần như không lệch): `data.fixed_references` bỏ clip gốc của mẫu; kiểm trên manifest part 1: 0 mẫu val / test còn thấy clip gốc, mọi mẫu đủ 3 tham chiếu |
+| 12 | BL-A không học (part 1, 20 epoch, AUC ~0,5 mọi ô, cả `balanced`) | train loss ~1,04 > ln 2: không khớp nổi tập train. Giả thuyết: quá ít bước với lr 1e-6 (~300 bước / epoch so với ~1.800 của gốc). Hướng: lr riêng cho AASIST hoặc giữ gốc và báo cáo |
+| 13 | BL-M/sup train loss ~189 không đổi | nghi ~1 % clip train không có khung mặt → điểm −10⁴, loss ~2·10⁴ không gradient; bỏ khỏi loss, đếm riêng, thống nhất cách chấm ở test |
+| 14 | Dừng sớm của nhóm M1 dựa trên **tổng** val loss 3 đầu (visual, audio, mismatch): đầu đã bão hoà có thể làm dừng sớm khi đầu khác còn tiến bộ | Part 1 chưa thấy (AUC audio đi ngang trước khi dừng: `no_sync` 0,979 ep 5, `no_ref` 0,970 ep 8); kiểm `loss_val/<đầu>_*` trên W&B trước. Sửa nếu cần: (a) chỉ dừng khi không đầu nào cải thiện trong `patience` epoch (đề xuất); (b) checkpoint tốt nhất riêng từng đầu. BL-A / BL-V / BL-M một đầu, không bị ảnh hưởng |
+| 15 | Test độ bền khi nén (CRF 35 / 40) trên tập test, không train lại, mọi model | Hạn chế 3. BioLip / LADDER (arXiv 2604.16808): mọi phương pháp giảm 0,17-0,25 AUC ở CRF 40; nhánh động học môi của M1 lấy ý từ đây → kiểm M1 có bền hơn BL-V. BioLip không thêm làm baseline (không có code gốc, kiểm 25/10), chỉ dẫn số paper |
+
+## 13. Nhật ký câu hỏi và quyết định (phần model)
+
+| Ngày | Câu hỏi / việc | Trả lời / quyết định |
+|---|---|---|
+| 15/10 | Chọn baseline, kiến trúc | BL-1 AVH-Align, BL-2 BioLip + 3 baseline tham chiếu; A1 AVCV, A2 MTN, A3 TriHead-Ref (đã thay bằng đội hình 23/10, §4) |
+| 17/10 | Demo sau này cần model đo độ lệch rồi dịch về 0? | đúng: SyncNet hoặc đầu độ trễ của A1; dịch về 0 rồi mới chấm "AI?" |
+| 17/10 | AV-HuBERT cần Python 3.10, demo thì sao? | AV-HuBERT ở worker riêng; demo Windows thì xuất ONNX / TorchScript |
+| 17/10 | Augment lệch tiếng tạo clip mới mỗi lần train? | không; trượt chuỗi đặc trưng khi nạp mẫu |
+| 18/10 | Code đủ sinh / train / demo chưa? | demo đã bị xoá cùng v002 → làm lại (Kaggle, 2 tab) |
+| 18/10 | W&B nên ghi gì | đề xuất ghi mọi bước; sau đó user: **chỉ train** (có prepare), không media |
+| 18/10 | Tỉ lệ fake / real hợp lý? | không đổi tỉ lệ dữ liệu (loss đã cân); sửa **ngưỡng** sang FPR cố định và báo nhiều base-rate (§8.2) |
+| 19/10 | Mỗi người 15-20 clip: đảm bảo không lệch | lấy mẫu train cân theo người; AUC cân theo người (§7, §8.1) |
+| 18/10 | Full / partial có giúp model định vị? | có (nhãn theo frame); thêm AP@IoU + AR chuẩn LAV-DF / AV-1M (§8.3) |
+| 22/10 | Research kiến trúc theo từng lớp, đa ngành, đa ngôn ngữ | board `slides/v003/model_board.html`: 12 điểm yếu (thêm X11 generator tối ưu SyncNet, X12 ít real), ~35 thẻ, 9 phát hiện code ↔ paper |
+| 23/10 | Quá nhiều model; chỉ giữ 2 baseline tốt nhất (cài lại đúng gốc) + 1-2 đề xuất | 2 baseline (AVH-Align, LIPINC-V2) không phủ giả tiếng → **3 baseline chuyên trách** (BL-V, BL-A, BL-M) + BL-Ens; M1 + M2 |
+| 23/10 | Sao BL-M chỉ học real, sao không học full? | paper chọn real-only để tránh lối tắt; nhưng so với M1 (có giám sát) thì cần bản học full → chạy **cả hai** (`avh_align`, `avh_align_sup`) |
+| 23/10 | "Khớp tiếng–môi" là gì khi generator vẽ đúng từng frame? | khớp **khẩu hình ↔ âm**, không phải thời gian; thời gian đã sửa bằng SyncNet, augment −1…+2 làm thời gian vô dụng với model |
+| 23/10 | Chốt: 9 cấu hình × 3 seed | cài đặt đầy đủ (§4-§5); 50 test qua |
+| 24/10 | Prepare chậm (~9 h) và rò RAM; tách CPU / GPU? | đo: dlib dò mặt 86 % thời gian, GPU phần lớn rảnh → tách stage `landmarks` (CPU, phiên Kaggle không GPU) khỏi stage model (GPU); mouth / lipinc / wave cũng chỉ CPU nên chạy cùng phiên CPU, xlsr ở phiên GPU. Worker mở lại sau 300 mẫu, mẫu lỗi thử lại ở cuối. Output: weight / repo upstream ở /kaggle/temp, chỉ giữ cache / runs / dataset |
+| 24/10 | Prepare lỗi `expected crop88/stack4` | checkpoint VSR ghi `stack_order_audio = 1` trong task; encoder vẫn nhận tiếng 104 chiều. Kiểm theo `feature_extractor_audio.proj.in_features`; AVH-Align cũng cố định stack 4 |
+| 23/10 | Prepare lỗi `av_hubert_seq2seq` | đối chiếu code AVH-Align (commit 55401de): thêm `import hubert_asr`, đổi checkpoint sang `self_large_vox_433h.pt` (đúng bản AVH-Align dùng; trước tải nhầm `large_vox_433h`), 4 worker nạp model lần lượt để không vượt RAM Kaggle |
+| 23/10 | Log đủ làm bằng chứng chưa (research) | đối chiếu checklist NeurIPS, Pineau v2.0, Model Cards: thêm môi trường, tỉ lệ dự phòng LIPINC, AUC theo giới, mục "Cách đọc" trong report, lý do dừng trong `generation.json`, benchmark lên W&B, W&B lỗi không dừng phiên, nhật ký compute §11.1 (§9) |
+| 23/10 | Giai đoạn đánh giá part 1: bao nhiêu seed? | **1 seed (42)**; thiết kế chốt rồi mới chạy 3 seed (`settings.SEEDS`) |
+| 23/10 | Đề xuất đã có tính mới chưa; baseline có paper không | rà lại: mọi baseline có paper (BL-M/sup do chính Smeu et al. đặt, BL-Ens theo Khalid et al. 2021); từng khối M1 / M2 đều đã có, cái mới là cách ghép + tách lệch / AI có sham; sửa §3 (Feng et al. 2023 đã có đặc trưng theo độ trễ; Referee đã có tham chiếu người); thêm §5.0, gắn link §14 |
+
+## 14. Nguồn
+
+Mã arXiv, tên và tác giả đầu kiểm lại bằng arXiv API ngày 23/10/2026.
+
+**Baseline (paper + code gốc)**
+- LIPINC-V2: Datta, Jia, Lyu, "Detecting Lip-Syncing Deepfakes: Vision Temporal Transformer for Analyzing Mouth Inconsistencies", [arXiv 2504.01470](https://arxiv.org/abs/2504.01470) · code [skrantidatta/LIPINC-V2](https://github.com/skrantidatta/LIPINC-V2) · bản đầu LIPINC: "Exposing Lip-syncing Deepfakes from Mouth Inconsistencies", [arXiv 2401.10113](https://arxiv.org/abs/2401.10113)
+- SSL + AASIST: Tak et al., "Automatic speaker verification spoofing and deepfake detection using wav2vec 2.0 and data augmentation", Odyssey 2022, [arXiv 2202.12233](https://arxiv.org/abs/2202.12233) · code [TakHemlata/SSL_Anti-spoofing](https://github.com/TakHemlata/SSL_Anti-spoofing) (MIT) · AASIST: Jung et al., ICASSP 2022, [arXiv 2110.01200](https://arxiv.org/abs/2110.01200) · RawBoost: Tak et al., ICASSP 2022, [arXiv 2111.04433](https://arxiv.org/abs/2111.04433) · XLS-R: Babu et al., [arXiv 2111.09296](https://arxiv.org/abs/2111.09296)
+- AVH-Align và AVH-Align/sup: Smeu et al., "Circumventing shortcuts in audio-visual deepfake detection datasets with unsupervised learning", CVPR 2025, [arXiv 2412.00175](https://arxiv.org/abs/2412.00175) · code [bit-ml/AVH-Align](https://github.com/bit-ml/AVH-Align) (commit 55401de, checkpoint `AVH-Align_AV1M.pt`) · encoder AV-HuBERT: Shi et al., ICLR 2022, [arXiv 2201.02184](https://arxiv.org/abs/2201.02184)
+- Gộp muộn (BL-Ens): Khalid et al., "Evaluation of an Audio-Video Multimodal Deepfake Dataset using Unimodal and Multimodal Detectors", ADGD @ ACM MM 2021, [arXiv 2109.02993](https://arxiv.org/abs/2109.02993) · FakeAVCeleb: Khalid et al., [arXiv 2108.05080](https://arxiv.org/abs/2108.05080)
+
+**Gần nhất với đề xuất (§5.0)**
+- Feng, Chen, Owens, "Self-Supervised Video Forensics by Audio-Visual Anomaly Detection", CVPR 2023, [arXiv 2301.01767](https://arxiv.org/abs/2301.01767)
+- POI-Forensics: Cozzolino et al., "Audio-Visual Person-of-Interest DeepFake Detection", CVPRW 2023, [arXiv 2204.03083](https://arxiv.org/abs/2204.03083) · Referee: Boo, Lee, Lee, "Referee: Reference-aware Audiovisual Deepfake Detection", [arXiv 2510.27475](https://arxiv.org/abs/2510.27475) · ID-Reveal: Cozzolino et al., ICCV 2021
+- Astrid, Ghorbel, Aouada, "Audio-Visual Deepfake Detection With Local Temporal Inconsistencies", ICASSP 2025, [arXiv 2501.08137](https://arxiv.org/abs/2501.08137)
+- Deshmukh et al., "Are DeepFakes Realistic Enough? Exploring Semantic Mismatch as a Novel Challenge", [arXiv 2604.28022](https://arxiv.org/abs/2604.28022)
+- SpeechForensics: Liang et al., NeurIPS 2024, [arXiv 2508.09913](https://arxiv.org/abs/2508.09913)
+
+**Khối dùng trong M1 / M2**
+- NPR: Tan et al., CVPR 2024, [arXiv 2312.10461](https://arxiv.org/abs/2312.10461)
+- Cost volume + soft-argmin: GC-Net, Kendall et al., [arXiv 1703.04309](https://arxiv.org/abs/1703.04309) · PSMNet, [arXiv 1803.08669](https://arxiv.org/abs/1803.08669) · RAFT, [arXiv 2003.12039](https://arxiv.org/abs/2003.12039)
+- Trộn lớp SSL: SUPERB, [arXiv 2105.01051](https://arxiv.org/abs/2105.01051) · Lee et al. 2022, [arXiv 2204.02639](https://arxiv.org/abs/2204.02639) · Pasad et al. 2021, [arXiv 2107.04734](https://arxiv.org/abs/2107.04734)
+- Gradient reversal: Ganin & Lempitsky, ICML 2015, [arXiv 1409.7495](https://arxiv.org/abs/1409.7495) · DANN, [arXiv 1505.07818](https://arxiv.org/abs/1505.07818) · Dao et al. 2026, [arXiv 2602.20805](https://arxiv.org/abs/2602.20805)
+- Loss gây nhầm lẫn: Tzeng et al., ICCV 2015, [arXiv 1510.02192](https://arxiv.org/abs/1510.02192) · Alvi et al., ECCV Workshops 2018, [arXiv 1809.02169](https://arxiv.org/abs/1809.02169) (đã kiểm arXiv API 25/10)
+- FiLM: Perez et al., AAAI 2018, [arXiv 1709.07871](https://arxiv.org/abs/1709.07871)
+- LipDA (ICML 2026 poster, chưa có link kiểm được) · Chandrasekaran et al. 2009 (PLoS Comput Biol)
+
+**Chuẩn ghi bằng chứng (§9, §11.1)**
+- [NeurIPS Paper Checklist](https://neurips.cc/public/guides/PaperChecklist) (mục 6 thiết lập, 7 ý nghĩa thống kê, 8 compute kể cả phiên hỏng) · [ML Reproducibility Checklist v2.0, Pineau](https://www.cs.mcgill.ca/~jpineau/ReproducibilityChecklist.pdf) · Model Cards: Mitchell et al., FAT* 2019, [arXiv 1810.03993](https://arxiv.org/abs/1810.03993) · [W&B: những gì tự ghi](https://docs.wandb.ai/guides/track/log) (commit / requirements chỉ khi bật Code Saving)
+
+**Khảo sát §1-§2**
+- BioLip / LADDER: [arXiv 2604.16808](https://arxiv.org/abs/2604.16808) · LoCC: ICME 2026, [arXiv 2606.22772](https://arxiv.org/abs/2606.22772) · PIA: [arXiv 2510.14241](https://arxiv.org/abs/2510.14241) · LipFD: NeurIPS 2024, [arXiv 2401.15668](https://arxiv.org/abs/2401.15668) · X-AVDT: [arXiv 2603.08483](https://arxiv.org/abs/2603.08483)
+- AV-Deepfake1M++: [arXiv 2507.20579](https://arxiv.org/abs/2507.20579) · KLASSify: [arXiv 2508.07337](https://arxiv.org/abs/2508.07337) · Pindrop: [arXiv 2508.08141](https://arxiv.org/abs/2508.08141)
+- XLAVS-R: [arXiv 2403.14402](https://arxiv.org/abs/2403.14402) · AV-LMMDetect: [arXiv 2602.23393](https://arxiv.org/abs/2602.23393) · Omni-Fake: CVPR 2026
+- Audio deepfake: [arXiv 2601.02914](https://arxiv.org/abs/2601.02914), [arXiv 2604.26465](https://arxiv.org/abs/2604.26465)
+- Layton et al., USENIX Security 2024, [pdf](https://www.usenix.org/system/files/sec24fall-prepub-1479-layton.pdf)
+- LAV-DF: [arXiv 2204.06228](https://arxiv.org/abs/2204.06228) · AV-Deepfake1M: [arXiv 2311.15308](https://arxiv.org/abs/2311.15308) (chuẩn định vị AP / AR)
+- Survey NCCU (thesis.lib.nccu.edu.tw) · 中国图象图形学报 survey ([doi 10.11834/jig.230088](https://doi.org/10.11834/jig.230088))

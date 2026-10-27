@@ -1,15 +1,16 @@
-# Models — cấu trúc detector
+# Model theo phiên bản
 
-Trạng thái: có detector tối thiểu trong `detector.py` và model căn chỉnh tiếng–môi trong `alignment.py`. Cả hai đã train trên feature AV-HuBERT thật của run `wav2lip_multi_001` (09–11/10/2026): detector là `experiments/y_001`, model căn chỉnh là `experiments/align_001` và `align_002`. Kết quả sơ bộ ở [báo cáo 11/10](../../docs/reports/2026-10-11_WAV2LIP_SYNC_RESULTS.md).
+| Phiên bản | Thư mục | Thời gian | Nguồn (repo @ commit) | Nội dung chính |
+|---|---|---|---|---|
+| v001 | [v001/](v001/) | 16/09 - 10/10/2026 | `VN-AV-DF-Capstone/vn-av-consistency-deepfake` @ `4c239de` | Pseudo-fake FATE, encoder PE-AV / FATE adapter / AV-HuBERT / DINOv2, so sánh theo ô 2×2 |
+| v002 | [v002/](v002/) | 11/10 - 14/10/2026 | `VN-AV-DF-Capstone/vn-av-consistency-deepfake` @ `1779279` | Bỏ FATE, thêm MechFake (pseudo-fake rẻ) và TriCue |
+| v003 | [v003/](v003/) + [`src/vn_av_df/`](../vn_av_df/) | từ 18/10/2026 | `linhxm/vn-av-df-forensics` @ `b017a27` | Bản đang dùng: baseline BL-V `lipinc_v2`, BL-A `ssl_aasist`, BL-M `avh_align`, BL-M/sup `avh_align_sup`, BL-Ens; đề xuất M1 `trihead_v2`, M2 `avh_align_plus` + ablation ([docs/v003_model.md](../../docs/v003_model.md)) |
 
-Mở `01_smoke_test.py` rồi Run để kiểm tra cả model, một vài bước train Y/X và dự đoán bằng feature giả lập. Test này không đọc video, không tải weights và không tạo kết quả nghiên cứu.
+## v003 (đang dùng)
 
-Đầu vào: audio `[batch, thời_gian, số_đặc_trưng_audio]`, visual `[batch, thời_gian, số_đặc_trưng_visual]` và lengths là số bước thời gian hợp lệ. Hai luồng phải được căn cùng cửa sổ và thời gian từ trước. Model chiếu mỗi luồng qua một lớp Linear, ghép chúng, chạy GRU và tạo một logit cho fake. Padding cuối chuỗi được bỏ qua. Đổi logit sang score bằng sigmoid; score chưa được hiệu chỉnh thành xác suất đáng tin cậy.
+Script các bước nằm ở `v003/` (00 tải encoder, 01 trích feature, 02 train, 03 test, 04 báo cáo, 05 đo thời gian); code model nằm trong package chung `src/vn_av_df/training/`. Cách chạy: [PIPELINE.md](../../PIPELINE.md).
 
-Chứa detector kết hợp đặc trưng audio và hình ảnh, xử lý thông tin theo thời gian và tạo điểm dự đoán real/fake. Bộ nạp hai nhánh AV-HuBERT đóng băng và preprocessing nằm trong `src/features/`; xem [hướng dẫn extractor](../features/README.md). AV-HuBERT vẫn là ứng viên cần kiểm chứng.
+## v001, v002 (lưu để tham khảo)
 
-Baseline Y và phương pháp X dùng cùng cấu trúc detector. Theo hướng hiện tại, khác biệt chính của X là thêm yêu cầu nhất quán giữa các bản nén trong lúc huấn luyện; phần đó thuộc `src/training/`, không cần tạo hai kiến trúc khác nhau chỉ vì có tên X/Y.
-
-`alignment.py` là model căn chỉnh tiếng–môi theo ý tưởng AVH-Align (Smeu và cộng sự, CVPR 2025), không phải bản tái lập bài báo. Mỗi luồng đi qua một MLP nhỏ. Với frame hình t, các frame tiếng t−K..t+K của cùng clip là ứng viên và frame t là đáp án đúng. Đầu ra là độ lệch trung bình của clip: −log xác suất chọn đúng frame tiếng khớp. Model chỉ học trên real, nên điểm cao nghĩa là tiếng và môi không khớp, không phải "giống Wav2Lip". Với `max_shift=S`, mỗi clip được chấm ở độ lệch cố định tốt nhất trong ±S frame, nên một độ lệch đều nhỏ không bị phạt; train vẫn dùng `max_shift=0`.
-
-Vòng lặp train ở `src/training/01_train.py`, tính chỉ số ở `src/evaluation/`. Checkpoint tải về nằm trong `weights/`; CLI train lưu checkpoint tại `experiments/<run_id>/best.pt` khi chọn thư mục output tương ứng.
+- Là bản chụp repo cũ tại commit ghi ở bảng (chỉ khác ở `ruff format`), **bỏ `data_pipeline/`** vì phần dữ liệu real đã thay bằng `src/data/` (v003). Không bảo trì, không chạy trong test của repo này.
+- Mỗi thư mục có `settings.py`, `src/vn_av_df/` và `tests/` riêng, trùng tên package với v003. Muốn chạy lại đúng như cũ thì clone repo nguồn và checkout commit ở bảng, không chạy lẫn với code v003.

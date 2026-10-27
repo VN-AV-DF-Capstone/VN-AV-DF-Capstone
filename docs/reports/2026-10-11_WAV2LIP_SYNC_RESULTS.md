@@ -76,7 +76,7 @@ python src/training/02_train_alignment.py --manifest cache/features/dataset_v1/w
 python src/evaluation/03_evaluate_alignment.py --run experiments/align_003
 ```
 
-Các bước trước đó (split, tạo fake, nén, trích feature, 02_fuse) ở bảng lệnh của [src/README.md](../../src/README.md). Không ghi đè run cũ: mỗi lần chạy dùng tên mới.
+Các bước trước đó (split, tạo fake, nén, trích feature, 02_fuse) ở bảng lệnh của [src/README.md](https://github.com/VN-AV-DF-Capstone/VN-AV-DF-Capstone/blob/pre-v003/src/README.md). Không ghi đè run cũ: mỗi lần chạy dùng tên mới.
 
 ## Việc tiếp theo
 

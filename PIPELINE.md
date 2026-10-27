@@ -1,0 +1,172 @@
+# VN-AV-DF v003 - hướng dẫn chạy pipeline
+
+```
+src/data (real, local) ─► part sạch vn-av-df-data-partN (600-800 clip, 20 nam + 20 nữ × 15-20 clip, split sẵn)
+  └─► notebooks/generate.ipynb   phiên "voice" → các phiên "lipsync" → finalize      (src/generators/0x_*.py)
+  └─► notebooks/prepare.ipynb    phiên "landmarks" (CPU, dlib) → song song phiên "cpu" (crop miệng, khung LIPINC, waveform) và "gpu" (AV-HuBERT Large, XLS-R) (src/models/v003/01_prepare.py)
+  └─► notebooks/train.ipynb      train 4 baseline + M1, M2 + 3 ablation → test một lần → report.md  (src/models/v003/02-04)
+```
+
+Mỗi bước chạy được ở local bằng script trong `src/generators/` và `src/models/v003/`, hoặc trên Kaggle bằng notebook tương ứng; cả hai cách gọi cùng các lệnh trong `src/vn_av_df/cli.py`. Cấu hình nằm ở `settings.py` (local) và các cell đầu của notebook (Kaggle). Pipeline dữ liệu real: [src/data/README.md](src/data/README.md).
+
+| Bước | Script local | Code (trong `src/vn_av_df/`) |
+|---|---|---|
+| Tải source / weight generator | `src/generators/00_setup.py [--generators ...]` | `generation/lipsync.py`, `wav2lip.py`, `musetalk.py` |
+| Kế hoạch sinh | `src/generators/01_plan.py` | `generation/plan.py` |
+| Phiên giọng (①②③ + track B) | `src/generators/02_voice.py` | `generation/voice/`, `generation/generate.py` |
+| Phiên lip-sync (④⑤⑥) | `src/generators/03_lipsync.py --generators ...` | `generation/lipsync.py`, `generation/generate.py` |
+| Gom → manifest có nhãn | `src/generators/04_finalize.py` | `generation/generate.py` |
+| Tải encoder + tài sản model | `src/models/v003/00_setup.py` | `assets.py`, `cli.py` (`model_assets`) |
+| Trích feature (bước riêng, dùng lại cho mọi model / seed / lần train / demo) | `src/models/v003/01_prepare.py [--encoders ...]` | `training/prepare.py`, `features/` |
+| Đo thời gian / bộ nhớ train (tuỳ chọn) | `src/models/v003/05_benchmark.py [--synthetic] [--models ...]` | `training/benchmark.py` |
+| Train (chạy lại thì tiếp từ epoch đã xong) | `src/models/v003/02_train.py [--models ...] [--seeds ...]` | `training/train.py`, `training/models.py` |
+| Test một lần | `src/models/v003/03_evaluate.py` | `training/evaluate.py` |
+| Báo cáo | `src/models/v003/04_report.py` | `training/report.py` |
+
+Môi trường worker (generator, TTS, AV-HuBERT): [environments/README.md](environments/README.md).
+
+Notebook trong `notebooks/` được **sinh từ `tools/make_notebooks.py`**: muốn đổi notebook (kể cả `REPO_URL` khi đổi repo GitHub) thì sửa script rồi chạy `python tools/make_notebooks.py .`, không sửa tay.
+
+## 6 cell và số sample mỗi clip real
+
+| | ORIGINAL AUDIO | SPLICED REAL AUDIO | AI VOICE |
+|---|---|---|---|
+| **REAL VIDEO** | ① real | ② sham (full + partial) | ③ giọng AI: track A (cả câu), B (một cụm, ghép); test thêm C (sửa trực tiếp) |
+| **LIP-SYNCED VIDEO** | ④ source | ⑤ donor | ⑥ both (vẽ môi theo track B) |
+
+- Mỗi clip chạy **một nửa số generator** (2 / 4 ở train và validation, 3 / 6 ở test), mỗi generator một lần, cho ra full + partial. Gán theo vòng: mỗi generator chạy số lần bằng nhau và chia đều ④/⑤/⑥; trong một clip các generator ở ô khác nhau.
+- Hệ giọng xoay vòng theo clip (1 hệ mỗi clip).
+- Chi tiết, số liệu và căn cứ: [docs/v003_generation.md](docs/v003_generation.md) (§0 là bản tóm tắt cho người chạy sinh).
+
+| | Mỗi clip real |
+|---|---|
+| train / validation | 9 file (6 có AI): 1 real + 2 sham + 2 giọng + 2 generator × 2 |
+| test | 12 file (9 có AI): 1 real + 2 sham + 3 giọng + 3 generator × 2 |
+
+Bước finalize ghi thêm `shortcut_audit.json`: khoảng lặng đầu / cuối, tỉ lệ lặng, độ to, độ dài (một mình) có đoán được nhãn AI không. AUC ngoài [0,3; 0,7] là cờ đỏ, phải sửa cách sinh trước khi train.
+
+## Generator và giọng
+
+| | train / validation / test | chỉ test (chưa thấy khi train) |
+|---|---|---|
+| Generator | wav2lip_gan, musetalk_1_5, iplap, videoretalking | latentsync_1_5, diff2lip |
+| Giọng | vieneu (VieNeu-TTS v3), f5_vi (F5-TTS tiếng Việt), omnivoice, seedvc (TTS → Seed-VC) | voxcpm2, vixtts; f5_inpaint (track C) |
+
+Danh sách nằm ở `settings.py` (`TRAIN_GENERATORS`, `TEST_ONLY_GENERATORS`, `TRAIN_VOICES`, `TEST_ONLY_VOICES`).
+
+- **Higgs Audio v3 đã được thay bằng viXTTS.** Higgs cần server SGLang-Omni (Python 3.12, benchmark trên H100), không chắc chạy được trên T4. viXTTS thuộc họ GPT + HiFi-GAN, khác họ với các hệ dùng khi train.
+- **IP-LAP chỉ phát hành weight qua OneDrive.** Tải tay `landmarkgenerator_checkpoint.pth` và `renderer_checkpoint.pth`, upload thành Kaggle dataset, rồi đặt `IPLAP_CHECKPOINTS` trong notebook generate (local: `cfg["generation"]["iplap_checkpoints"]`).
+- Môi trường worker của 4 generator mới và 6 hệ giọng **chưa chạy thử trên Kaggle**.
+
+## Sinh trên Kaggle (notebook generate)
+
+1. **Phiên giọng** (`PHASE = "voice"`, cần GPU). Chạy **trước**, vì cell ⑥ cần track B.
+2. **Các phiên lip-sync** (`PHASE = "lipsync"`, `GENERATORS = [...]`), mỗi phiên vài generator. Phiên sau attach Output của phiên trước vào `PREVIOUS_OUTPUT`; job đã xong được bỏ qua.
+3. Phiên cuối (đủ mọi job) tự finalize → `datasets/vn-av-df-data/<part>/manifest.jsonl`.
+4. **Chia đợt** (tuỳ chọn): `BATCH = (k, n)` (local: `--batch k/n`) chỉ chạy job của đợt k trong n đợt clip cha. Lip-sync dừng báo lỗi nếu job ⑥ của đợt chưa có record giọng.
+5. **Ghép với máy local:** `python src/generators/03_lipsync.py --generators ... --batch k/n --previous <Output Kaggle>/vn-av-df-forensics` (cũng có ở `02_voice.py`, `04_finalize.py`). Plan lấy từ Kaggle qua `--previous`, không chạy `01_plan.py` ở local: plan ghi đường dẫn của máy nên plan tạo ở hai nơi khác nhau. Mỗi generator chỉ chạy ở một nơi.
+
+Mỗi job ghi `records/<key>.json`. Hết giờ (`TIME_BUDGET_HOURS`) hoặc lỗi thì chạy lại, job dở được xoá và làm lại. Lỗi riêng một clip (không thấy mặt, generator báo lỗi) thì bỏ job đó; bỏ 10 job liên tiếp thì dừng.
+
+**Đường dự phòng khi generator lỗi** (từ part 2; job chạy được giữ y như trước nên record cũ vẫn dùng được):
+
+| Generator | Lỗi ở part 1 | Dự phòng |
+|---|---|---|
+| IP-LAP | 43/400 job: FaceMesh trượt một frame là bỏ cả clip (mặt nhỏ, nghiêng, người thứ hai) | chạy lại trên khung vuông cố định quanh mặt cả clip rồi dán về (`iplap_worker.py`); thử trên part 1: còn 9 % clip trượt |
+| VideoRetalking | 4 job `TypeError`: dlib không thấy mặt ở nửa đầu clip | lấy hộp mặt từ S3FD, landmark vẫn bằng dlib (`vrt_worker.py`) |
+| Diff2Lip | 3 job hết VRAM (cả 3 đúng 108 frame) | chạy lại với batch lấy mẫu 8 rồi 2 (kết quả không đổi) |
+
+**Tiếng donor (② sham, ⑤)** (`donor_fit` trong `settings.py`): part 1 cắt cứng tiếng donor theo độ dài clip gốc, nên sham / donor full hết tiếng giữa câu (AUC khoảng lặng cuối 0,08). Từ part 2, plan ghi mọi donor cùng người, cùng split, dài ≥ clip gốc − 1 s; lúc sinh, chọn donor có đoạn nói vừa nhất, giữ lặng đầu / cuối như clip gốc (`voice/audio.py: fit_donor`). Mô phỏng trên part 1 cho AUC khoảng lặng cuối 0,55 và không clip nào thiếu donor (trước đây 33 clip dài nhất không có sham). Plan cũ không có khoá này vẫn chạy theo cách cũ.
+
+## Model
+
+Chi tiết ở [docs/v003_model.md](docs/v003_model.md).
+
+| Tên | Loại | Ý chính |
+|---|---|---|
+| lipinc_v2 | **BL-V** (Datta et al. 2025, code gốc Keras) | 8 crop miệng màu (5 liên tiếp + 3 cùng tư thế) + ảnh hiệu → 2 vision temporal transformer + attention chéo; chỉ điểm video |
+| ssl_aasist | **BL-A** (Tak et al. 2022) | XLS-R 300M fine-tune + AASIST, RawBoost, cửa sổ 4 s |
+| avh_align | **BL-M** (CVPR 2025) | Φ(v, a) MLP, InfoNCE ±15 chỉ trên real; khởi tạo từ checkpoint công bố |
+| avh_align_sup | **BL-M/sup** | cùng Φ, cross-entropy trên log-sum-exp với nhãn AI |
+| bl_ens | **BL-Ens** | max(BL-V, BL-A) sau chuẩn hoá theo real validation; không train |
+| trihead_v2 | **M1** | 3 nhánh (sync, trace, audio) → 3 đầu + tham chiếu người; NPR đúng paper, tư thế đầu, trọng số nhóm lớp XLS-R, top-5 frame, pseudo-fake, xoá thông tin người nói (loss gây nhầm lẫn bị chặn) |
+| avh_align_plus | **M2** | Φ của AVH-Align trên cả dải độ trễ ±15 + CNN 2D, môi–đầu, pseudo-fake |
+| trihead_v2_no_sync / _no_trace / _no_ref | ablation M1 | bỏ một nhánh / bỏ tham chiếu |
+
+`settings.MODELS` là đội hình chính; ablation ở `settings.ABLATIONS`; mặc định train cả hai (`cfg["models"]`). Encoder cần trích suy ra từ model (`prepare.encoders_for`). `speechforensics` chỉ còn cho demo khi chưa có checkpoint.
+
+## Kết quả
+
+Đánh giá chấm 4 tác vụ: ai / visual / audio / mismatch. Kèm theo:
+- phân rã theo cell, generator, giọng, full / partial, đã thấy / chưa thấy khi train;
+- AUC trong từng speaker;
+- định vị trong đoạn partial (ô cao nhất có nằm trong đoạn, ô sát chỗ nối so với ô giữa);
+- định vị chuẩn LAV-DF / AV-Deepfake1M: **AP theo IoU 0,5 / 0,75 / 0,95 và AR@1/5/10**, để so được với các bài khác;
+- chế độ **ref-norm**: chuẩn hoá điểm theo 3 clip real tham chiếu của chính người đó (bỏ các clip đó và mọi file sinh từ chúng khỏi phép đo);
+- **điểm vận hành**: ngưỡng FPR 1 % / 5 % trên real validation, TPR và báo nhầm ở test, precision khi fake chiếm 50 % / 10 % / 1 % ngoài thực tế; báo nhầm riêng cho real và sham. Lý do: tỉ lệ fake trong dữ liệu (~70 %) cao hơn nhiều ngoài đời, nên ngưỡng F1 tối đa sẽ báo nhầm quá nhiều (Layton et al., USENIX Security 2024). Demo dùng ngưỡng FPR 5 %.
+
+`runs/<RUN_NAME>/report.md` gồm bảng mean ± std theo seed và các **cổng** đặt trước, mỗi cổng có ΔAUC kèm CI bootstrap theo speaker. Test chỉ chạy một lần và được khoá bằng `test-lock.json`.
+
+## Log W&B (quá trình train)
+
+Chỉ ghi cho **quá trình train**: notebook `prepare` và `train` (`USE_WANDB = True`, secret `WANDB_API_KEY`, project **private**). Pipeline dữ liệu real và phần sinh fake **không** ghi W&B; nhật ký của chúng nằm ở ledger (`src/data`, `data/v003/ledger/`) và `generation.json` / `records/` (sinh fake). Không đẩy ảnh / video người thật. Code ở `src/vn_av_df/tracking.py`.
+
+**Train không ghi vào ledger.** Ledger (`data/v003/ledger/ledger.sqlite`) chỉ là sổ của dữ liệu real ở máy local; train chạy trên Kaggle / máy GPU khác và không được ghi vào đó. Bản ghi tương ứng của train nằm trong `runs/<RUN_NAME>/`:
+
+| File | Nội dung |
+|---|---|
+| `provenance.json` | mỗi lần chạy thêm một mục: manifest (sha) từng part, chữ ký đặc trưng và số mẫu tìm thấy của từng cache, commit git + sha code train, tài sản (revision XLS-R, biên nhận tải checkpoint AVH-Align), tuỳ chọn train |
+| `training.json` | model, seed, tuỳ chọn của lần chạy gần nhất |
+| `<model>_seed<seed>/history.json` | từng epoch: loss train / val, thành phần loss, grad norm, AUC validation, thời gian; lần train tiếp (`resumed_at`), epoch tốt nhất, lý do dừng |
+| `<model>_seed<seed>/best.pt`, `last.pt` | checkpoint tốt nhất; checkpoint tạm để train tiếp (xoá khi model xong) |
+| `benchmark.json` | số đo của `05_benchmark.py` |
+| sau test | `metrics.json`, `predictions-{val,test}.npz`, `evaluation.json`, `test-lock.json`, `report.md`, `gates.json` |
+
+| Bước (job_type) | Ghi theo thời gian | Ghi lúc kết thúc / artifact |
+|---|---|---|
+| `prepare` | tiến độ, mẫu/phút theo encoder | tỉ lệ frame hợp lệ; **kiểm chéo độ lệch tiếng-hình bằng AV-HuBERT** trên clip real; `extraction.json` |
+| `train` (mỗi model × seed) | mỗi epoch: loss tổng + từng đầu (frame / video), grad norm, lr, giây/epoch, VRAM, **AUC validation 4 tác vụ**, AUC validation (ai) theo ô / generator / giọng / kind | epoch tốt nhất, lý do dừng, giờ train, số tham số, có augment hay không; `best.pt` + `history.json` |
+| `evaluate` (một lần) | — | bảng tổng (AUC, AP, EER, F1, FAR), phân rã, theo người, ref-norm, định vị, **ROC**, histogram điểm theo ô; `evaluation.json` + `test-lock.json` + mọi `metrics.json` + `predictions-test.npz` |
+| `report` | — | bảng AUC mean ± std theo seed, **các cổng + CI 95%**; `report.md` + `gates.json` |
+
+Mỗi run có config (cấu hình, seed, hash dữ liệu / test-lock) để tái lập. Run id lưu ở `wandb-<tên>.json` cạnh kết quả, chạy lại sau khi bị ngắt sẽ ghi tiếp đúng run.
+
+## Demo (notebook `demo.ipynb`, Kaggle)
+
+Chạy ở phiên tương tác có GPU, mở link `gradio.live` in ra ở cell cuối. Code ở `src/vn_av_df/demo/`.
+
+| Tab | Làm gì |
+|---|---|
+| 1. Tạo fake từ video real | video ≤ 60 s → chọn ô ③ voice / ④ source / ⑤ donor (tải thêm tiếng thật khác) / ⑥ both, full hoặc partial (đoạn tự chọn hoặc nhập giây), generator, hệ giọng, câu mới cho cụm sửa → video fake + nhãn thật. Dùng lại đúng các hàm của pipeline sinh |
+| 2. Phân tích video | chuẩn hoá → **đo và sửa độ lệch tiếng-hình bằng SyncNet** (báo riêng nếu lệch vượt ngưỡng BT.1359) → đặc trưng như lúc train → mỗi model chạy theo cửa sổ 7 s → điểm 4 tác vụ, kết luận theo ngưỡng validation (`metrics.json`), timeline có vẽ chồng nhãn thật. Thêm 1-3 video real của cùng người để dùng tham chiếu (TriHead) |
+
+- Mặc định cài Wav2Lip + LatentSync 1.5 và F5-TTS tiếng Việt; muốn generator / giọng khác thì sửa `GENERATORS`, `VOICES` (mỗi môi trường cài thêm 5-15 phút).
+- Chưa có checkpoint: `RUN_DIR = None` → chỉ chạy `speechforensics` (không cần train) để thử luồng.
+- Video tối đa 60 s (giới hạn của bộ trích AV-HuBERT). Link `gradio.live` là công khai trong thời gian chạy: chỉ dùng video được phép, tắt khi xong.
+
+## Thời gian / dung lượng (ước lượng)
+
+- **Một part** (600-800 clip): 1.350-1.800 lần chạy generator và 600-800 job giọng; khoảng 5.850-7.800 file.
+- **GPU cho sinh fake:** khoảng 55-100 giờ cho mỗi part (gần 2-4 tuần quota Kaggle). Chia phiên theo generator để chạy song song trên nhiều notebook, ghép bằng `PREVIOUS_OUTPUT`.
+- **Trích feature (đo trên part 1, 24/10):** dlib dò mặt chiếm 86 % thời gian CPU của AV-HuBERT (7,1 / 8,3 s mỗi mẫu một luồng); phiên một-stage cũ mất ~9 h GPU / part (trung bình ~14 mẫu/phút, GPU phần lớn rảnh). Phiên CPU riêng cho dlib không nhanh hơn (đo 24/10: ~13 mẫu/phút trên 4 nhân, ~10 h) nên tách ba phiên (`SESSION`), mỗi phiên < 12 h, Output < 20 GB:
+
+  | `SESSION` | Accelerator | `ENCODERS` (tự chọn) | Ước tính / part | Cache |
+  |---|---|---|---|---|
+  | 1 · `"landmarks"` | **None** (không tốn quota GPU) | `landmarks` | ~10 h (đo part 1) | phiên 1 + 2a ~11 GB (○) |
+  | 2a · `"cpu"` (sau 1, song song 2b) | None | `mouth`, `lipinc`, `wave`; `OTHER_CACHES` = Output phiên 1 | ~1-2,5 h (○) | |
+  | 2b · `"gpu"` (sau 1, song song 2a) | T4 ×2 | `avhubert` (đọc landmark), `xlsr`; `OTHER_CACHES` = Output phiên 1 | ~1,5-2 h (○) | ~14 GB (○) |
+
+  Hết giờ giữa chừng: chạy lại cùng `SESSION` với `PREVIOUS_CACHE` = Output phiên dở. Worker dlib rò ~1 GB/giờ mỗi worker nên mở lại sau 300 mẫu (`restart_every`).
+
+  Hai stage AV-HuBERT cho kết quả trùng từng giá trị với chạy một mạch (test `test_avhubert_two_stages_match_single_stage`). Nhiều part: mỗi part prepare riêng; notebook train nhận danh sách mọi part (`DATASET_PARTS`) và mọi cache (`CACHES`), mỗi mẫu được tìm ở mọi thư mục cache.
+- **Output Kaggle:** weight và repo upstream nằm ở `/kaggle/temp` (liên kết từ `weights/`, `external/`), worker env ở `/kaggle/temp/vn-av-df-workers`; cuối phiên chỉ giữ phần cần (prepare: cache; train: `runs/`; generate: dataset + plan), kể cả khi prepare lỗi giữa chừng.
+- **Train:** 2 notebook song song, mỗi notebook 2 GPU (`LANES`, `training/lanes.py`): `-ta` = BL-A | M1, M2, BL-V (test khi đủ cả 10 model); `-tb` = BL-M, BL-M/sup, `no_trace` | `no_sync`, `no_ref` (`RUN_TEST = False`). Đo part 1: BL-A 9,5 phút / epoch, M1 ~15 phút / epoch. Hết `MAX_HOURS` (11) thì dừng sạch, `-ta-2` / `-tb-2` (Copy & Edit, `PREVIOUS_RUN` = Output phiên trước; `-ta-2` gộp cả `-tb`) train tiếp; test + report tự chạy một lần ở phiên `-ta` đầu tiên đủ cả 10 model. Ước lượng cả đội hình (○): part 1 · 1 seed ~10-25 giờ phiên; 3 part · 3 seed ~80-300 giờ GPU. Đo thật bằng `src/models/v003/05_benchmark.py`.
+
+## Kiểm thử
+
+```bash
+python -m pytest            # tests/ (pipeline tổng hợp end-to-end) + tests/data (dữ liệu real)
+python -m ruff check .
+```
+
+Test dùng TTS / generator / ASR giả lập, không thay cho việc chạy thử trên vài clip thật.
