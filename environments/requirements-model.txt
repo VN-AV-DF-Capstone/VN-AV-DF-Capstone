@@ -1,3 +1,0 @@
-# Minimal detector prototype; AV-HuBERT/Fairseq and generators are not included.
--r ../requirements.txt
-torch==2.12.0
