@@ -12,7 +12,7 @@ from pathlib import Path
 
 # "data": thu thập/review; "demo": demo local.
 # "generation" và "training": các profile dùng trên Kaggle (notebook đã tự cài).
-PROFILE = "demo" 
+PROFILE = "demo"
 
 if __name__ == "__main__":
     root = Path(__file__).resolve().parent
