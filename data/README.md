@@ -1,4 +1,15 @@
-# Dữ liệu theo phiên bản: dataset_v1 và dataset_v2
+# Dữ liệu theo phiên bản
+
+## v003 (hiện hành)
+
+- `data/v003/`: workspace của `src/data/` (inputs, ledger, raw, pool, registry, archive). Đổi bằng biến môi trường `VNAV_DATA`.
+- `data/exports/vn-av-df-data/vn-av-df-data-partN/`: part real đã chia split, đầu vào của `src/generators/`.
+- Fake đã chốt: `datasets/vn-av-df-data/<part>/` ở gốc repo. Chi tiết: [src/data/README.md](../src/data/README.md), [PIPELINE.md](../PIPELINE.md).
+
+## Trước v003: dataset_v1 và dataset_v2
+
+Code đọc các thư mục dưới đây nằm ở tag `pre-v003`.
+
 
 `dataset_v1` là bộ sơ bộ đã cắt, review và chia split trên một người; từ 09/10/2026 được ghép với clip của người 2 (part1) thành split nhiều người cho run Wav2Lip. Nguồn mở rộng hiện ở `dataset_v2`. `src/data/preparation/settings.py` đang đặt `DATASET_VERSION = 'dataset_v2'` (đã commit), nên các bước 01–05 và review chạy cho V2; generator, nén, feature có settings riêng và vẫn dùng V1. Tên phiên bản không chứng nhận dataset đã hoàn tất. Bản AVSP-Net cũ vẫn ở backup/archive.
 
@@ -70,7 +81,7 @@ data/
 
 Không đặt nguồn vào `data/dataset/_V2`: các file chạy dựng đường dẫn từ `data/sources|raw|real|manifests/<dataset_version>`. Với nguồn mới trong V2, chỉnh `videos.csv` rồi chạy bước 01. `raw/dataset_v2/download_001/download_sources.csv` đang khóa danh sách 1.954 video; nếu `selected_videos.csv` thay đổi, đặt `DOWNLOAD_RUN` mới thay vì trộn với đợt tải đang dở. Giữ file `.part` để tiếp tục tải. Xem [kiểm kê dọn dẹp](../docs/reports/2026-09-23_WORKSPACE_CLEANUP_AUDIT.md) trước khi xóa output generator V1; một số mục trong kiểm kê đó đã được dọn.
 
-Giống repo cũ ở trình tự thu thập → tải → cắt → review → chia dữ liệu → sinh fake → nén. Khác ở việc thư mục tách theo loại dữ liệu, có phiên bản; không còn bốn loại pseudo-fake làm cấu trúc trung tâm. Thứ tự chạy nằm trong `src/data/01_...07_...` và [bảng lệnh](../src/README.md), không cần nhớ thứ tự qua tên thư mục dữ liệu.
+Giống repo cũ ở trình tự thu thập → tải → cắt → review → chia dữ liệu → sinh fake → nén. Khác ở việc thư mục tách theo loại dữ liệu, có phiên bản; không còn bốn loại pseudo-fake làm cấu trúc trung tâm. Thứ tự chạy nằm trong `src/data/01_...07_...` và [bảng lệnh](https://github.com/VN-AV-DF-Capstone/VN-AV-DF-Capstone/blob/pre-v003/src/README.md), không cần nhớ thứ tự qua tên thư mục dữ liệu.
 
 Nhóm nguồn vẫn giữ trong cột tier (podcast, presentation, lecture hoặc nhóm do bạn chọn); không mất tính đa dạng khi media đặt chung thư mục. Chống leakage vẫn theo người/nguồn. Bản nén/fake kế thừa split của real.
 

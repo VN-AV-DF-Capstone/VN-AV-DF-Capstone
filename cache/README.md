@@ -1,5 +1,7 @@
 # Cache local
 
+v003: `src/models/v003/01_prepare.py` ghi feature vào `cache/vn-av-df-data/<encoder>/` (xem [PIPELINE.md](../PIPELINE.md)). Bảng dưới là cache của pipeline trước v003 (tag `pre-v003`) trên máy đã chạy.
+
 Preview, phép đo chất lượng và feature có thể tạo lại. Không coi cache cũ là đầu vào mới. Mỗi lần trích feature ghi `run.json` với hash checkpoint, manifest, media và preprocessing; chỉ dùng lại cache khi các hash này khớp. Không commit nội dung cache.
 
 | Thư mục | Nội dung |

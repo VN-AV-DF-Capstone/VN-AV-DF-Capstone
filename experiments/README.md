@@ -1,5 +1,7 @@
 # Run của hướng lip-sync mới
 
+Kết quả của pipeline trước v003; code tạo ra chúng (`src/evaluation/04_check_av_offset.py`, `05_evaluate_peak_sync.py`…) nằm ở tag `pre-v003`. Run v003 ghi vào `runs/<RUN_NAME>/` (không commit).
+
 Các run trên Wav2Lip ngày 09–11/10/2026; ý nghĩa và số liệu ở [báo cáo 11/10](../docs/reports/2026-10-11_WAV2LIP_SYNC_RESULTS.md).
 
 | Run | Nội dung |
