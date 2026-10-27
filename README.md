@@ -48,7 +48,7 @@ python -m pytest        # tests/ + tests/data
 | `environments/`, `tools/` | Môi trường worker; công cụ Kaggle và sinh notebook |
 | `tests/` | Test end-to-end và từng phần trên dữ liệu tổng hợp; `tests/data/` cho dữ liệu real |
 | `docs/` | Thiết kế v003 (`v003_data.md`, `v003_generation.md`, `v003_model.md`), báo cáo và tài liệu cũ ([chỉ mục](docs/README.md)) |
-| `data/`, `datasets/`, `cache/`, `runs/`, `weights/`, `checkpoints/` | Dữ liệu, feature, kết quả train và weight ở máy; không commit |
+| `data/`, `cache/`, `runs/`, `weights/`, `checkpoints/` | Dữ liệu (`data/vn-av-df-data-partN` là part đã chốt), feature, kết quả train và weight ở máy; không commit |
 | `experiments/` | CSV kết quả trước v003 (Wav2Lip, 09-11/10/2026) |
 
 ## Trước v003

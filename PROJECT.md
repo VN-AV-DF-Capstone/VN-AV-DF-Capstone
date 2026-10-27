@@ -26,7 +26,7 @@ Model của pre-v003 (y_001, align_002, peak_sync_001) không đưa sang v003: b
 
 - `src/vn_av_df/generation/lipsync.py` và các worker generator được băm vào provenance (`adapter_sha256`); `src/vn_av_df/training/*.py` được băm vào run. Sửa nội dung thì bản ghi / run cũ không còn khớp.
 - `src/data/preparation/vn_av_data/data/cut.py`, `jumpcut.py`, `vad.py`, `features/face.py`, `features/syncnet.py` và luật cắt trong `configs/data.yaml` thuộc cut signature: đổi thì bước 03 chặn clip đã cắt. `cut.py` không chạy `ruff format` vì lý do này.
-- Thư mục Output trên Kaggle giữ tên `vn-av-df-forensics/` và đường dẫn `generation/plans`, `datasets/`, `cache/`, `runs/` như cũ, để Output các phiên trước dùng tiếp được.
+- Thư mục Output trên Kaggle giữ tên `vn-av-df-forensics/` và đường dẫn `generation/plans`, `cache/`, `runs/` như cũ, để Output các phiên trước dùng tiếp được. Part đã chốt nay ở `data/vn-av-df-data-partN`; khi gộp Output cũ, code tự tìm thêm ở `datasets/vn-av-df-data/`.
 - Notebook clone nhánh mặc định của repo này: thay đổi chỉ tới Kaggle sau khi đã merge vào `main`.
 
 ## Việc kế tiếp

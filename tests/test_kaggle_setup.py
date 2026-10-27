@@ -182,3 +182,23 @@ def test_notebook_cells_compile_and_use_settings(notebook):
         assert "prune_output" in text  # Output chỉ giữ kết quả.
         # W&B chỉ ở quá trình train (prepare + train), không ở bước sinh fake.
         assert ("WANDB_API_KEY" in text) == (notebook in ("prepare", "train"))
+
+
+def test_merge_previous_reads_old_datasets_layout(tmp_path):
+    """Output Kaggle cũ ghi part ở datasets/vn-av-df-data/; part nay ở data/ vẫn gộp được."""
+    from vn_av_df.generation.generate import merge_previous
+
+    old, new = tmp_path / "old", tmp_path / "new"
+    for root in (old, new):
+        (root / "generation/plans").mkdir(parents=True)
+        (root / "generation/plans/p.json").write_text('{"jobs": []}', encoding="utf-8")
+    clip = old / "datasets/vn-av-df-data/vn-av-df-data-part1/clips/a.mp4"
+    clip.parent.mkdir(parents=True)
+    clip.write_bytes(b"x")
+    cfg = {
+        "root": str(new),
+        "plan": str(new / "generation/plans/p.json"),
+        "generated_dataset": str(new / "data/vn-av-df-data-part1"),
+    }
+    assert merge_previous(cfg, [old]) == {"files_copied": 1}
+    assert (new / "data/vn-av-df-data-part1/clips/a.mp4").read_bytes() == b"x"

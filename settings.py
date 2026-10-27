@@ -14,7 +14,7 @@ from data_settings import DATASET_NAME, PART, part_name
 ROOT = Path(__file__).resolve().parent
 CLEAN_DATASET = ROOT / "data/exports" / DATASET_NAME / part_name()
 GENERATION_NAME = part_name()
-DATASET = ROOT / "datasets" / DATASET_NAME
+DATASET = ROOT / "data"  # Mỗi part đã chốt (real + fake) là data/vn-av-df-data-partN.
 # "all" = mọi part đã tải vào DATASET; hoặc ["vn-av-df-data-part1", ...].
 DATASET_PARTS = [part_name()]
 RUN_NAME = "train_part1_v003"  # Output: runs/<RUN_NAME>/<model>_seed<seed>/.

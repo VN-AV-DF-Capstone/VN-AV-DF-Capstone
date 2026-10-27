@@ -98,12 +98,12 @@ Mỗi phiên làm **một phần** của một part sạch:
 1. **Phiên giọng** (`PHASE = "voice"`): ① real, ② sham, ③ giọng AI (track A/B, test thêm track C) và track B cho ⑥. Cần GPU cho TTS. Chạy **trước**.
 2. **Phiên lip-sync** (`PHASE = "lipsync"`, `GENERATORS = [...]`): ④⑤⑥, mỗi phiên vài generator.
    Phiên sau attach Output phiên trước vào `PREVIOUS_OUTPUT` (danh sách), job đã xong được bỏ qua.
-3. Phiên cuối (đủ mọi job): cell 6 tự finalize → `datasets/vn-av-df-data/<part>/manifest.jsonl`.
+3. Phiên cuối (đủ mọi job): cell 6 tự finalize → `data/<part>/manifest.jsonl`.
 
 | | |
 |---|---|
 | Đầu vào | Part sạch v003 (data/exports/…/vn-av-df-data-partN) upload thành Kaggle dataset |
-| Đầu ra | `vn-av-df-forensics/datasets/vn-av-df-data/<part>/` + `generation/plans/<part>.json` |
+| Đầu ra | `vn-av-df-forensics/data/<part>/` + `generation/plans/<part>.json` |
 | Lưu ý | Môi trường worker generator / TTS **chưa chạy thử trên Kaggle**: lỗi cài thì xem log in ra, sửa công thức trong `environments/worker_envs.py` |
 | IP-LAP | Weight chỉ có trên OneDrive: tải tay 2 file `.pth`, upload thành dataset, đặt `IPLAP_CHECKPOINTS` |
 """,
@@ -220,7 +220,7 @@ prepare = nb(
             """
 # v003 · Trích feature (AV-HuBERT Large, crop miệng, khung LIPINC-V2, XLS-R, waveform)
 
-Đầu vào: dataset đã finalize của các part (`datasets/vn-av-df-data/<part>`). Đầu ra: `cache/vn-av-df-data/{avhubert,mouth,lipinc,xlsr,wave}` (chỉ encoder mà `MODELS` cần).
+Đầu vào: dataset đã finalize của các part (`data/<part>`). Đầu ra: `cache/vn-av-df-data/{avhubert,mouth,lipinc,xlsr,wave}` (chỉ encoder mà `MODELS` cần).
 Hết giờ phiên thì Save Version, phiên sau attach `PREVIOUS_CACHE` để trích tiếp (cache đã có được bỏ qua).
 Mỗi part chạy **ba phiên** (đặt `SESSION`), mỗi phiên dưới 12 giờ và Output dưới 20 GB:
 1. `SESSION = "landmarks"` (Accelerator: None, không tốn quota GPU): dlib dò mặt, phần chậm nhất (part 1: ~13 mẫu/phút trên 4 nhân, ~10 giờ).

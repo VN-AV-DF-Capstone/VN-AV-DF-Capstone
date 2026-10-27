@@ -754,6 +754,9 @@ def merge_previous(cfg, sources):
             plan_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(other_plan, plan_path)
         folder = source / out.relative_to(cfg["root"])
+        # Output Kaggle trước 28/10/2026 ghi part ở datasets/vn-av-df-data/.
+        if not folder.is_dir():
+            folder = source / "datasets/vn-av-df-data" / out.name
         log = folder / "generation.json"
         take = {}
         if log.is_file() and (out / "generation.json").exists():
