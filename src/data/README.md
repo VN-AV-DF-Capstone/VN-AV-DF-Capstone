@@ -11,7 +11,7 @@ Chỉ dùng video của chính mình hoặc đã được phép. Raw, clip và p
 
 ```powershell
 conda activate vn-av-df
-python 00_install.py                     # từ thư mục gốc repo: cài src/data/preparation + package chính
+python -m pip install -r requirements.txt   # từ thư mục gốc repo, xem README.md ở gốc
 python src/data/00_setup.py              # tải YuNet, Silero VAD, SFace, WeSpeaker, SyncNet v2
 ```
 

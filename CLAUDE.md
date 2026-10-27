@@ -84,7 +84,7 @@ Read [PROJECT.md](PROJECT.md) before changing the pipeline or models. Start with
 
 ## Environment
 
-- Main environment: conda `vn-av-df`, Python 3.11, installed with `python 00_install.py`. Use a Python interpreter verified on the current machine; use its absolute path when invoking tools.
+- Main environment: conda `vn-av-df`, Python 3.11, installed with `python -m pip install -r requirements.txt` (CUDA torch first on Windows, see README.md). Use a Python interpreter verified on the current machine; use its absolute path when invoking tools.
 - Do not use the base Python interpreter from PATH without checking dependencies. Personal machine paths (`ENVS`, `AVH_PYTHON`, `MUSETALK_PYTHON` in `settings.py`) are local settings: never commit them.
 - FFmpeg and FFprobe must be available on PATH. Default to CPU; enable CUDA only after checking the target machine.
 - Generators, TTS and AV-HuBERT run in separate worker environments ([environments/README.md](environments/README.md)). Do not silently modify a working environment.

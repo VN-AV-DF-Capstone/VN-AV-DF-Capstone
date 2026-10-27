@@ -13,4 +13,5 @@ Script các bước nằm ở `v003/` (00 tải encoder, 01 trích feature, 02 t
 ## v001, v002 (lưu để tham khảo)
 
 - Là bản chụp repo cũ tại commit ghi ở bảng (chỉ khác ở `ruff format`), **bỏ `data_pipeline/`** vì phần dữ liệu real đã thay bằng `src/data/` (v003). Không bảo trì, không chạy trong test của repo này.
+- Báo cáo kết quả: [v001](../../docs/reports/2026-10-15_V001_REPORT.md), [v002](../../docs/reports/2026-10-15_V002_REPORT.md). Kết quả v001 trong báo cáo chạy bằng nhánh `archive/v001-part1-results` của repo nguồn, không phải `4c239de`.
 - Mỗi thư mục có `settings.py`, `src/vn_av_df/` và `tests/` riêng, trùng tên package với v003. Muốn chạy lại đúng như cũ thì clone repo nguồn và checkout commit ở bảng, không chạy lẫn với code v003.

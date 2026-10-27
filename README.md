@@ -26,10 +26,14 @@ Benchmark và detector **lip-sync deepfake trong video tiếng Việt**: ngườ
 Môi trường conda `vn-av-df` (Python 3.11), chạy mọi lệnh từ thư mục gốc repo:
 
 ```powershell
+conda create -n vn-av-df python=3.11 -y
 conda activate vn-av-df
-python 00_install.py    # cài src/data/preparation + package vn_av_df (PROFILE trong file)
+python -m pip install torch --index-url https://download.pytorch.org/whl/cu128   # Windows + GPU NVIDIA (PyPI chỉ có bản CPU)
+python -m pip install -r requirements.txt   # src/data/preparation + package vn_av_df, mọi extra
 python -m pytest        # tests/ + tests/data
 ```
+
+Cần `ffmpeg` và `ffprobe` trong PATH; tải dữ liệu YouTube cần thêm Node.js. Cấu hình local (part, model, đường dẫn môi trường worker) nằm trong `settings.py`.
 
 - Dữ liệu real (URL YouTube → part sạch): [src/data/README.md](src/data/README.md), từng lệnh ở [src/data/RUNBOOK.md](src/data/RUNBOOK.md).
 - Sinh fake, trích feature, train, test, báo cáo (local hoặc Kaggle): [PIPELINE.md](PIPELINE.md).

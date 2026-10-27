@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
-from data_settings import DATASET_NAME  # noqa: E402, F401
+from settings import DATASET_NAME  # noqa: E402, F401
 
 DATA = os.environ.get("VNAV_DATA", "data/v003")
 EXPORTS = "data/exports"

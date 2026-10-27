@@ -1,17 +1,29 @@
-"""Cấu hình mặc định cho các file .py ở local (src/generators/, src/models/v003/).
+"""Cấu hình mặc định cho các file .py ở local (src/data/, src/generators/, src/models/v003/).
 
-Data/review: chọn PART trong data_settings.py. Trên Kaggle: chỉnh các cell cấu hình trong
-notebook, không cần sửa file này rồi upload lại. config() lấy giá trị hiện tại; trong notebook
-chỉ gọi nó sau khi chọn đường dẫn/model. RUN_NAME là folder kết quả, không phải tên dataset.
+Trên Kaggle: chỉnh các cell cấu hình trong notebook, không cần sửa file này rồi upload lại.
+config() lấy giá trị hiện tại; trong notebook chỉ gọi nó sau khi chọn đường dẫn/model.
+RUN_NAME là folder kết quả, không phải tên dataset.
 """
 
 import os
 import sys
 from pathlib import Path
 
-from data_settings import DATASET_NAME, PART, part_name
-
 ROOT = Path(__file__).resolve().parent
+DATASET_NAME = "vn-av-df-data"  # Code generation / training / notebook đang dùng tên này.
+# Part mà generation / training ở local đọc. src/data tự chia part (20 nam + 20 nữ × 20 clip,
+# split gán sẵn, xem configs/data.yaml) và export part N ra data/exports/<DATASET_NAME>/.
+PART = 1
+
+
+def part_name(number=None):
+    """Part là gói dữ liệu bổ sung, không phải số phiên bản của thí nghiệm."""
+    number = PART if number is None else number
+    if type(number) is not int or number < 1:
+        raise ValueError("PART must be a positive integer")
+    return f"{DATASET_NAME}-part{number}"
+
+
 CLEAN_DATASET = ROOT / "data/exports" / DATASET_NAME / part_name()
 GENERATION_NAME = part_name()
 DATASET = ROOT / "data"  # Mỗi part đã chốt (real + fake) là data/vn-av-df-data-partN.

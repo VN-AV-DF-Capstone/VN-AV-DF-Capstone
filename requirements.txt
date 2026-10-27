@@ -1,0 +1,5 @@
+# Môi trường chính: conda vn-av-df, Python 3.11. Chạy từ thư mục gốc repo:
+#   python -m pip install -r requirements.txt
+# Windows: cài torch bản CUDA trước (PyPI chỉ có torch CPU cho Windows), xem README.md.
+-e ./src/data/preparation
+-e .[generation,training,demo,dev]

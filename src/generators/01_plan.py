@@ -1,4 +1,4 @@
-"""Kế hoạch sinh cho part sạch đang chọn (PART trong data_settings.py)."""
+"""Kế hoạch sinh cho part sạch đang chọn (PART trong settings.py)."""
 
 import sys
 from pathlib import Path
