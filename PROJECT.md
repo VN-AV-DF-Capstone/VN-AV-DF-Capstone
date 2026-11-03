@@ -10,6 +10,7 @@ Cập nhật 27/10/2026. Repo chính chuyển sang code **v003** thống nhất 
 | v001 | 16/09 - 10/10/2026 | Pseudo-fake FATE, so sánh ô 2×2 | `src/models/v001/` |
 | v002 | 11/10 - 14/10/2026 | MechFake + TriCue | `src/models/v002/` |
 | v003 | từ 18/10/2026 | Dữ liệu real mới, sáu ô, 6 generator + 7 nguồn giọng AI, baseline + M1 / M2 | `src/data/`, `src/generators/`, `src/models/v003/`, `src/vn_av_df/` |
+| v004 | từ 03/11/2026 (code của Linh, `linhxm/vn-av-df-forensics` @ `36942ca`) | Nhãn mismatch đo được (AV-HuBERT + SyncNet), M3 `trihead_v4` (môi–tiếng–đầu, ngữ điệu), BL-A2 `xlsr_frozen`, train mỗi bước một model, chọn checkpoint theo val AUC | `src/models/v004/`, `src/vn_av_df/` |
 
 Model của pre-v003 (y_001, align_002, peak_sync_001) không đưa sang v003: baseline v003 đã có detector cùng loại (BL-M `avh_align`, BL-M/sup `avh_align_sup`) và điểm khớp không cần train (`speechforensics`, dùng trong demo khi chưa có checkpoint).
 

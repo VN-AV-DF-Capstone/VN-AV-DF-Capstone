@@ -1,4 +1,6 @@
-"""Đánh giá v003: một lần trên test, ngưỡng chọn trên validation.
+"""Đánh giá trên test (cả 3 part), ngưỡng chọn trên validation. v004: test từng model ngay
+sau khi train xong (notebook train, mỗi bước một model); mỗi checkpoint chấm một lần, gọi lại
+thì đọc kết quả đã có; mọi lần chấm ghi vào test-log.json (số lần mỗi model dùng test).
 
 Tác vụ (điểm video; điểm cao = nghi ngờ):
 - ai: sample có bị AI không (label). Model 3 đầu: max(visual, audio).
@@ -19,7 +21,8 @@ Báo cáo:
 - BL-Ens (không train): max(BL-V, BL-A) sau khi chuẩn hoá điểm mỗi model theo clip real validation
   (z-score), cho tác vụ ai; visual = BL-V, audio = BL-A. Model chỉ có điểm video (frame_level =
   False, LIPINC-V2) không có phép đo định vị.
-Kết quả: `<run>/<model>_seed<seed>/metrics.json`, `predictions-{val,test}.npz`; khoá test-lock.json.
+Kết quả: `<run>/<model>_seed<seed>/metrics.json`, `predictions-{val,test}.npz`; `evaluation.json`
+gộp mọi model đã chấm; `test-log.json`.
 """
 
 import time
@@ -42,9 +45,17 @@ TARGET_KEY = {"ai": "label", "visual": "synthetic_visual", "audio": "synthetic_a
 
 
 def target(row, task):
+    """Nhãn video của một tác vụ. Mismatch v004 (training/sync_labels.py): None = không xác định
+    (mask) → mọi phép đo của tác vụ đó bỏ mẫu này."""
     if task == "mismatch":
+        if "_mismatch" in row:
+            return row["_mismatch_eval"]
         return int(bool(row.get("av_mismatch_intervals")))
     return int(bool(row.get(TARGET_KEY[task])))
+
+
+def known(rows, task):
+    return [r for r in rows if target(r, task) is not None]
 
 
 def auc(labels, scores):
@@ -98,8 +109,16 @@ def at_threshold(labels, scores, threshold):
 
 
 @torch.no_grad()
-def predict(model, cfg, rows, device):
-    data = BenchData(cfg, rows, model.needs, references=model.references, fixed_references=True)
+def predict(model, cfg, rows, device, lag=None):
+    """lag: trượt tiếng cố định k frame cho mọi mẫu (phép thử trễ); None = như dữ liệu."""
+    data = BenchData(
+        cfg,
+        rows,
+        model.needs,
+        references=model.references,
+        fixed_references=True,
+        fixed_lag=lag,
+    )
     loader = torch.utils.data.DataLoader(
         data, batch_size=cfg["training"]["eval_batch_size"], collate_fn=collate
     )
@@ -123,7 +142,35 @@ def predict(model, cfg, rows, device):
                 if not h.startswith("_")
             }
             out[sid] = {"frames": frames, "video": video, "mask": mask[i, :length].cpu().numpy()}
+            if "_cell" in heads:  # M3: xác suất loại thao tác (6 ô)
+                out[sid]["cell"] = heads["_cell"][i].float().softmax(-1).cpu().numpy().tolist()
     return out
+
+
+def manipulation_type(model, rows, predictions):
+    """Đầu loại thao tác của M3 (đầu ra cho suy luận loại trừ): độ chính xác, recall từng ô và
+    ma trận nhầm lẫn (hàng = ô thật, cột = ô dự đoán) trên tập đưa vào."""
+    classes = list(getattr(model, "cell_classes", ()))
+    pairs = [
+        (classes.index(r["cell"]), int(np.argmax(predictions[r["sample_id"]]["cell"])))
+        for r in rows
+        if r.get("cell") in classes and "cell" in predictions.get(r["sample_id"], {})
+    ]
+    if not classes or not pairs:
+        return None
+    matrix = np.zeros((len(classes), len(classes)), int)
+    for truth, guess in pairs:
+        matrix[truth, guess] += 1
+    recall = {
+        c: float(matrix[i, i] / matrix[i].sum()) for i, c in enumerate(classes) if matrix[i].sum()
+    }
+    return {
+        "classes": classes,
+        "samples": len(pairs),
+        "accuracy": float(np.trace(matrix) / matrix.sum()),
+        "recall": recall,
+        "confusion": matrix.tolist(),
+    }
 
 
 def task_scores(model, prediction):
@@ -154,27 +201,55 @@ def frame_head(model, prediction, task):
     return None
 
 
+INTERVAL_KEY = {
+    "visual": "visual_fake_intervals",
+    "audio": "audio_fake_intervals",
+    "ai": "fake_intervals",
+}
+
+
+def intervals(row, task):
+    """Đoạn (giây) mang nhãn 1 của tác vụ; None = không xác định (bỏ khỏi phép đo định vị).
+
+    mismatch: đoạn lệch theo cách tạo (av_mismatch_intervals: sham, voice, tiếng thay) + đoạn môi
+    do generator vẽ nếu số đo tại lag 0 nói lệch (nhãn v004, training/sync_labels.py); số đo không
+    chắc (mask) → None. Ngoài các đoạn đó là 0 (real ở độ trượt 0)."""
+    if task != "mismatch":
+        return list(row.get(INTERVAL_KEY[task]) or [])
+    spans = [tuple(s) for s in row.get("av_mismatch_intervals") or []]
+    info = row.get("_mismatch")
+    gen = (info or {}).get("gen_intervals") or []
+    if info is not None and gen:
+        from vn_av_df.training.sync_labels import generated_state
+
+        state = generated_state(info, 0)
+        if state is None:
+            return None
+        if state:
+            spans += [tuple(s) for s in gen]
+    return spans
+
+
 def localization(model, rows, predictions, task):
-    """Partial: AUC frame trong / ngoài đoạn (cùng clip) và ô sát chỗ nối vs ô giữa đoạn."""
-    key = {
-        "visual": "visual_fake_intervals",
-        "audio": "audio_fake_intervals",
-        "ai": "fake_intervals",
-    }[task]
+    """Partial: AUC frame trong / ngoài đoạn (cùng clip) và ô sát chỗ nối vs ô giữa đoạn; thêm
+    AUC trong / ngoài theo ô (sham, voice, source, donor, both)."""
     inside_auc, top_inside, edge, middle = [], [], [], []
+    by_cell = defaultdict(list)
     for row in rows:
-        if row.get("kind") != "partial" or not row.get(key):
+        spans = intervals(row, task) if row.get("kind") == "partial" else None
+        if not spans:
             continue
         scores = frame_head(model, predictions[row["sample_id"]], task)
         if scores is None:
             continue
         n = len(scores)
         truth = np.zeros(n, bool)
-        for a, b in row[key]:
+        for a, b in spans:
             truth[int(round(a * 25)) : int(round(b * 25))] = True
         if truth.all() or not truth.any():
             continue
         inside_auc.append(roc_auc_score(truth, scores))
+        by_cell[row.get("cell")].append(inside_auc[-1])
         top_inside.append(bool(truth[int(np.argmax(scores))]))
         idx = np.flatnonzero(truth)
         near = np.zeros(n, bool)
@@ -191,6 +266,10 @@ def localization(model, rows, predictions, task):
         "top_frame_inside": float(np.mean(top_inside)),
         "mean_score_edge": float(np.mean(edge)),
         "mean_score_middle": float(np.mean(middle)) if middle else None,
+        "by_cell": {
+            cell: {"clips": len(v), "auc_inside_vs_outside": float(np.mean(v))}
+            for cell, v in sorted(by_cell.items(), key=lambda kv: str(kv[0]))
+        },
     }
 
 
@@ -228,18 +307,17 @@ def proposals(scores, step=0.04, levels=(50, 60, 70, 80, 90, 95), keep=10):
 
 def temporal_metrics(model, rows, predictions, task):
     """Định vị kiểu LAV-DF / AV-Deepfake1M: AP theo IoU (0,5 / 0,75 / 0,95) trên mọi video test
-    (video real chỉ góp báo nhầm) và AR@N (recall với N đoạn đầu, trung bình IoU 0,5-0,95)."""
-    key = {
-        "visual": "visual_fake_intervals",
-        "audio": "audio_fake_intervals",
-        "ai": "fake_intervals",
-    }[task]
+    (video real chỉ góp báo nhầm) và AR@N (recall với N đoạn đầu, trung bình IoU 0,5-0,95).
+    mismatch: video có nhãn không xác định (mask) bị bỏ."""
     pool, truth = [], {}
     for row in rows:
         scores = frame_head(model, predictions[row["sample_id"]], task)
         if scores is None:
             return None
-        truth[row["sample_id"]] = [tuple(span) for span in row.get(key) or []]
+        spans = intervals(row, task)
+        if spans is None:
+            continue
+        truth[row["sample_id"]] = [tuple(span) for span in spans]
         for score, a, b in proposals(scores):
             pool.append((score, row["sample_id"], a, b))
     total = sum(len(v) for v in truth.values())
@@ -392,6 +470,7 @@ def operating_points(val_labels, val_scores, labels, scores):
 
 def task_metrics(cfg, val_rows, test_rows, val_scores, test_scores, task, seen):
     """Mọi phép đo điểm video cho một tác vụ (ngưỡng chọn trên validation); None nếu không đo được."""
+    val_rows, test_rows = known(val_rows, task), known(test_rows, task)
     if any(test_scores.get(r["sample_id"]) is None for r in test_rows):
         return None
     v_labels = [target(r, task) for r in val_rows]
@@ -443,6 +522,54 @@ def save_predictions(path, scores):
     )
 
 
+SHIFT_LAGS = (2, 3, 4)
+
+
+def shift_applicable(model):
+    """Model nhận cả tiếng lẫn hình (trượt tiếng mới có nghĩa)."""
+    needs = set(model.needs)
+    return "av" in needs or {"ssl", "mouth"} <= needs
+
+
+def shift_robustness(model, cfg, val_rows, test_rows, device, val_pred, test_pred, lags=SHIFT_LAGS):
+    """Phép thử trễ (RESEARCH_WORKLOG/v004_model.md §7): clip real test bị trượt tiếng k frame (trượt
+    đặc trưng như lúc train). AI = 0 với mọi k nên điểm AI? không nên tăng. Báo tỉ lệ báo nhầm ở
+    ngưỡng FPR 5 % của real validation (k = 0) và AUC real trượt so với real gốc (0,5 = không bị
+    lừa); đầu mismatch (nếu có) thì ngược lại nên tăng khi k lớn."""
+    val_real = [r for r in val_rows if r.get("cell") == "real"]
+    test_real = [r for r in test_rows if r.get("cell") == "real"]
+    if not val_real or not test_real:
+        return None
+
+    def scores(pred, task):
+        values = [task_scores(model, pred[r["sample_id"]]).get(task) for r in test_real]
+        return None if any(v is None for v in values) else values
+
+    reference = np.array([task_scores(model, val_pred[r["sample_id"]])["ai"] for r in val_real])
+    threshold = float(np.quantile(reference, 0.95))
+    base = scores(test_pred, "ai")
+    base_mm = scores(test_pred, "mismatch")
+    out = {
+        "real_test_clips": len(test_real),
+        "threshold_fpr_0.05": threshold,
+        "fpr_lag_0": float(np.mean(np.asarray(base) > threshold)),
+    }
+    for k in lags:
+        pred = predict(model, cfg, test_real, device, lag=k)
+        shifted = scores(pred, "ai")
+        entry = {
+            "fpr": float(np.mean(np.asarray(shifted) > threshold)),
+            "auc_vs_unshifted": auc([1] * len(shifted) + [0] * len(base), shifted + base),
+        }
+        mm = scores(pred, "mismatch")
+        if mm is not None and base_mm is not None:
+            entry["mismatch_auc_vs_unshifted"] = auc(
+                [1] * len(mm) + [0] * len(base_mm), mm + base_mm
+            )
+        out[f"lag_{k}"] = entry
+    return out
+
+
 def evaluate_model(cfg, model_dir, rows, device, seen):
     model = load_model(Path(model_dir) / "best.pt", device)
     val_rows = [r for r in rows if r["split"] == "validation"]
@@ -461,17 +588,31 @@ def evaluate_model(cfg, model_dir, rows, device, seen):
         result = task_metrics(cfg, val_rows, test_rows, val_scores, test_scores, task, seen)
         if result is None:
             continue
-        if model.frame_level and task != "mismatch":
+        if model.frame_level:  # v004: cả mismatch (đoạn lệch tiếng-môi)
             result["localization"] = localization(model, test_rows, test_pred, task)
             result["temporal"] = temporal_metrics(model, test_rows, test_pred, task)
         metrics["tasks"][task] = result
+    kinds = manipulation_type(model, test_rows, test_pred)
+    if kinds is not None:
+        metrics["manipulation_type"] = kinds
+    if shift_applicable(model):
+        metrics["shift_robustness"] = shift_robustness(
+            model, cfg, val_rows, test_rows, device, val_pred, test_pred
+        )
     save_predictions(Path(model_dir) / "predictions-val.npz", val_all)
     save_predictions(Path(model_dir) / "predictions-test.npz", test_all)
     write_json(Path(model_dir) / "metrics.json", metrics)
     return metrics
 
 
-ENSEMBLE = {"name": "bl_ens", "visual": "lipinc_v2", "audio": "ssl_aasist"}
+# Ghép muộn (không train): ai = max(z_visual, z_audio). bl_ens: hai baseline đúng gốc (v003);
+# bl_ens_av (v004): hai chuyên gia học được trên cùng dữ liệu (BL-M/sup chấm AI? từ độ khớp, BL-A2
+# giọng) → trả lời câu "một model hay ghép muộn chuyên gia tốt" (v003 §5.9 RQ-M1 bỏ ngỏ).
+ENSEMBLES = (
+    {"name": "bl_ens", "visual": "lipinc_v2", "audio": "ssl_aasist"},
+    {"name": "bl_ens_av", "visual": "avh_align_sup", "audio": "xlsr_frozen"},
+)
+ENSEMBLE = ENSEMBLES[0]
 
 
 def load_predictions(path, task):
@@ -490,13 +631,21 @@ def zscore(val, test, val_rows):
 
 
 def evaluate_ensemble(cfg, runs, rows, seen):
-    """BL-Ens cho từng seed có đủ BL-V và BL-A: ai = max(z_V, z_A), visual = z_V, audio = z_A."""
+    """Mỗi ghép muộn trong ENSEMBLES, mỗi seed có đủ hai thành viên."""
+    results = {}
+    for spec in ENSEMBLES:
+        results.update(evaluate_one_ensemble(cfg, runs, rows, seen, spec))
+    return results
+
+
+def evaluate_one_ensemble(cfg, runs, rows, seen, spec):
+    """ai = max(z_V, z_A), visual = z_V, audio = z_A (z-score theo real validation)."""
     val_rows = [r for r in rows if r["split"] == "validation"]
     test_rows = [r for r in rows if r["split"] == "test"]
     results = {}
-    for visual_dir in sorted(runs.glob(f"{ENSEMBLE['visual']}_seed*")):
+    for visual_dir in sorted(runs.glob(f"{spec['visual']}_seed*")):
         seed = visual_dir.name.rsplit("_seed", 1)[1]
-        audio_dir = runs / f"{ENSEMBLE['audio']}_seed{seed}"
+        audio_dir = runs / f"{spec['audio']}_seed{seed}"
         if not (audio_dir / "predictions-test.npz").is_file():
             continue
         parts = {}
@@ -512,7 +661,7 @@ def evaluate_ensemble(cfg, runs, rows, seen):
             scores["ai"] = {
                 k: max(scores["visual"][k], scores["audio"][k]) for k in scores["visual"]
             }
-        out = runs / f"{ENSEMBLE['name']}_seed{seed}"
+        out = runs / f"{spec['name']}_seed{seed}"
         out.mkdir(parents=True, exist_ok=True)
         metrics = {"model": out.name, "frame_level": False, "tasks": {}}
         metrics["members"] = {"visual": visual_dir.name, "audio": audio_dir.name}
@@ -529,17 +678,35 @@ def evaluate_ensemble(cfg, runs, rows, seen):
     return results
 
 
-def evaluate_all(cfg, force=False):
+def evaluated(folder, stamp):
+    """metrics.json đã có của đúng checkpoint + dữ liệu này (không phải chấm lại)."""
+    path = Path(folder) / "metrics.json"
+    if not path.is_file():
+        return None
+    metrics = read_json(path)
+    return metrics if metrics.get("stamp") == stamp else None
+
+
+def evaluate_all(cfg, force=False, models=None):
+    """Test model đã train xong. `models` (tên model, vd. ["trihead_v4"]): chỉ chấm các model này
+    (bước train vừa xong); None: mọi model trong runs. Model khác đã chấm thì đọc lại kết quả.
+    Checkpoint đã chấm (cùng sha best.pt, cùng dữ liệu) không chạy lại trừ khi force; checkpoint
+    mới của model đã từng chấm (train lại) được chấm và ghi là lần thứ n trong test-log.json.
+    Ghép muộn tính lại từ dự đoán đã lưu khi đủ hai thành viên (không cần GPU)."""
     rows, selection = training_dataset(cfg)
     runs = Path(cfg["runs"])
     device = cfg["device"] if torch.cuda.is_available() or cfg["device"] == "cpu" else "cpu"
-    lock = runs / "test-lock.json"
-    models = sorted(p for p in runs.iterdir() if (p / "best.pt").is_file())
-    stamp = {"dataset": selection, "checkpoints": {p.name: sha(p / "best.pt") for p in models}}
-    if lock.exists() and not force:
-        previous = read_json(lock)
-        if previous["stamp"] != fingerprint(stamp):
-            raise ValueError("Test already run with other checkpoints/data; use a new run or force")
+    names = {m for m in models} if models else None
+    ensembles = {spec["name"] for spec in ENSEMBLES}
+    folders = sorted(
+        p
+        for p in runs.iterdir()
+        if (p / "best.pt").is_file() and p.name.rsplit("_seed", 1)[0] not in ensembles
+    )
+    data = fingerprint(selection)
+    stamps = {p.name: {"checkpoint": sha(p / "best.pt"), "dataset": data} for p in folders}
+    log_path = runs / "test-log.json"
+    log = read_json(log_path) if log_path.is_file() else []
     train_rows = [r for r in rows if r["split"] == "train"]
     seen = {
         "generators": {
@@ -547,13 +714,39 @@ def evaluate_all(cfg, force=False):
         },
         "voices": {r["voice_method"] for r in train_rows if r.get("voice_method")},
     }
-    results = {}
+    results, fresh = {}, []
     began = time.monotonic()
     test = sum(r["split"] == "test" for r in rows)
-    for index, folder in enumerate(models, 1):
-        print(f"=== evaluate [{index}/{len(models)}] {folder.name}: {test} mẫu test", flush=True)
+    chosen = [p for p in folders if names is None or p.name.rsplit("_seed", 1)[0] in names]
+    for folder in folders:
+        old = None if force else evaluated(folder, stamps[folder.name])
+        if old is not None:
+            results[folder.name] = old
+        elif folder not in chosen:
+            print(f"    {folder.name}: chưa chấm test (không thuộc lượt này)", flush=True)
+    for index, folder in enumerate(chosen, 1):
+        if folder.name in results:
+            print(f"=== evaluate {folder.name}: đã chấm checkpoint này, đọc lại", flush=True)
+            continue
+        print(f"=== evaluate [{index}/{len(chosen)}] {folder.name}: {test} mẫu test", flush=True)
         tick = time.monotonic()
-        results[folder.name] = evaluate_model(cfg, folder, rows, device, seen)
+        metrics = evaluate_model(cfg, folder, rows, device, seen)
+        metrics["stamp"] = stamps[folder.name]
+        write_json(folder / "metrics.json", metrics)
+        results[folder.name] = metrics
+        fresh.append(folder)
+        times = 1 + sum(e["model"] == folder.name for e in log)
+        log.append(
+            {
+                "model": folder.name,
+                **stamps[folder.name],
+                "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "session": cfg.get("session"),
+                "test_use": times,
+            }
+        )
+        if times > 1:
+            print(f"    CHÚ Ý: {folder.name} dùng test lần {times} (checkpoint mới)", flush=True)
         aucs = " ".join(
             f"{t} {m['auc']:.3f}"
             for t, m in results[folder.name]["tasks"].items()
@@ -565,24 +758,38 @@ def evaluate_all(cfg, force=False):
             flush=True,
         )
     results.update(evaluate_ensemble(cfg, runs, rows, seen))
-    write_json(lock, {"stamp": fingerprint(stamp), "details": stamp})
+    write_json(log_path, log)
     write_json(
         runs / "evaluation.json",
         {"seen": {k: sorted(v) for k, v in seen.items()}, "results": results},
     )
-    log_evaluation(cfg, runs, rows, results, seen, stamp, models)
+    stamp = {"dataset": selection, "checkpoints": {k: v["checkpoint"] for k, v in stamps.items()}}
+    log_evaluation(cfg, runs, rows, results, seen, stamp, fresh)
     return {name: {t: m["tasks"][t]["auc"] for t in m["tasks"]} for name, m in results.items()}
 
 
 def log_evaluation(cfg, runs, rows, results, seen, stamp, models):
-    """Run "evaluate" (một lần): mọi bảng số liệu test + ROC + histogram điểm + artifact khoá."""
+    """Run "evaluate" mỗi lần chấm (theo phiên): bảng test của mọi model đã chấm tới lúc đó +
+    ROC + histogram điểm + artifact; `models` = các model vừa chấm ở lần này."""
+    session = cfg.get("session")
+    group = cfg.get("run_group") or runs.name  # lane ghi vào <runs>-gpu<i>, group vẫn là <runs>
+    # Tên run (và file wandb-<tên>.json): một model thì tên model, nhiều model thì số lượng; danh
+    # sách đủ ở config evaluated_now (ghép mọi tên vượt giới hạn 260 ký tự đường dẫn Windows).
+    now = Path(models[0]).name if len(models) == 1 else (f"{len(models)}models" if models else "")
     run = tracking.open_run(
         cfg,
         "evaluate",
-        f"{runs.name}-test",
-        group=runs.name,
-        config={"seen": {k: sorted(v) for k, v in seen.items()}, "stamp": fingerprint(stamp)},
+        f"{group}-test" + (f"-{session}" if session else "") + (f"-{now}" if now else ""),
+        group=group,
+        config={
+            "seen": {k: sorted(v) for k, v in seen.items()},
+            "stamp": fingerprint(stamp),
+            "evaluated_now": [Path(m).name for m in models],
+            "session": session,
+            "train_group": cfg.get("train_group"),
+        },
         folder=runs,
+        tags=[f"group:{cfg['train_group']}"] if cfg.get("train_group") else (),
     )
     if not run.active:
         return
@@ -657,7 +864,7 @@ def log_evaluation(cfg, runs, rows, results, seen, stamp, models):
     run.artifact(
         f"evaluation-{runs.name}",
         "evaluation",
-        [runs / "evaluation.json", runs / "test-lock.json"]
+        [runs / "evaluation.json", runs / "test-log.json"]
         + [runs / f / "metrics.json" for f in results]
         + [runs / f / "predictions-test.npz" for f in results],
         {"stamp": fingerprint(stamp)},
