@@ -4,7 +4,8 @@ Nhãn theo frame: visual / audio / mismatch = tỉ lệ frame nằm trong khoả
 label (bị AI), synthetic_visual, synthetic_audio, có mismatch.
 Đặc trưng (`needs`): av (AV-HuBERT a / v), ssl (XLS-R theo nhóm lớp [T, nhóm, 1024]), mouth (crop
 miệng + landmark môi + tư thế đầu), pose (chỉ landmark môi + tư thế đầu, không nạp crop), lipinc
-(8 crop màu LIPINC-V2, không theo frame), wave (tiếng 16 kHz [T, 640]).
+(8 crop màu LIPINC-V2, không theo frame), wave (tiếng 16 kHz [T, 640]), syll (v006: đơn vị âm tiết
++ thẻ theo frame [T, 7], features/syllables.py; lấy từ tiếng nên trượt / thay đoạn cùng tiếng).
 Augment độ lệch tiếng-hình (chỉ khi train): dịch đặc trưng tiếng (AV-HuBERT audio, XLS-R) so với
 hình k frame, k ngẫu nhiên đều trong cfg["training"]["audio_lag_aug"] (mặc định −1…+2; dương =
 tiếng trễ), như nhau cho real và fake, nhãn giữ nguyên; frame mất tiếng ở mép bị mask. Real đã
@@ -37,7 +38,7 @@ KEYS = {
     "audio": "audio_fake_intervals",
     "mismatch": "av_mismatch_intervals",
 }
-AUDIO_KEYS = ("a", "ssl", "wave", "prosody")
+AUDIO_KEYS = ("a", "ssl", "wave", "prosody", "syll")
 STATIC_KEYS = ("lipinc",)  # không theo frame: không cắt theo độ dài, không crop
 PSEUDO_RANGE_S, PSEUDO_MARGIN_S = (0.3, 3.0), 0.5
 # Lớp của đầu "loại thao tác" (M3): ô của mẫu; pseudo-fake (thay đoạn tiếng thật) xếp như sham.
@@ -105,9 +106,22 @@ def replace_audio(item, other, targets, rng):
     size = rng.randint(low, high)
     start = rng.randint(margin, n - margin - size)
     source = min(start, m - size)
+    if "syll" in other and rng.random() < 0.5:
+        # v006: một nửa số lần hai mép đoạn đúng biên âm tiết của clip nguồn (đưa "ghép theo biên
+        # từ, không AI" vào train, docs/v006_sau-review.md §2.7).
+        edges = np.flatnonzero(other["syll"][:, 0] > 0)
+        edges = edges[(edges >= margin) & (edges <= min(n, m) - margin)]
+        pairs = [(a, b) for a in edges for b in edges if low <= b - a <= high]
+        if pairs:
+            start, end = rng.choice(pairs)
+            size, source = int(end - start), int(start)
     for key in keys:
         item[key] = item[key].copy()
         item[key][start : start + size] = other[key][source : source + size]
+    if "syll" in keys:  # đơn vị bị cắt ở hai mép đoạn thay
+        item["syll"][start, 0] = 1
+        if start + size < n:
+            item["syll"][start + size, 0] = 1
     targets["mismatch"][start : start + size] = 1.0
     if "mismatch_valid" in targets:
         targets["mismatch_valid"][start : start + size] = True
@@ -173,6 +187,7 @@ ENCODERS_FOR_NEED = {
     "wave": ("wave",),
     # M3: ngữ điệu (từ tiếng 16 kHz) + đầu / lông mày (landmark của cache AV-HuBERT, tư thế đầu).
     "prosody": ("avhubert", "mouth", "wave"),
+    "syll": ("syll",),  # v006: đơn vị âm tiết + thẻ (features/syllables.py)
 }
 
 
@@ -321,6 +336,10 @@ class BenchData(torch.utils.data.Dataset):
                     pose = z["pose"] if "pose" in z.files else np.zeros((len(z["lips"]), 3))
             item["head"] = head_features(landmarks, pose, seen)
             lengths += [len(item["prosody"]), len(item["head"])]
+        if "syll" in needs:
+            with np.load(self.cache_file("syll", sid), allow_pickle=False) as z:
+                item["syll"] = z["syll"].astype(np.float32)
+            lengths.append(len(item["syll"]))
         if "lipinc" in needs:
             with np.load(self.cache_file("lipinc", sid), allow_pickle=False) as z:
                 static["lipinc"] = z["frames"].copy()
@@ -356,7 +375,9 @@ class BenchData(torch.utils.data.Dataset):
             ]
             if pool:
                 other, _ = self.load(
-                    rng.choice(pool), None, needs=self.needs & {"av", "ssl", "wave", "prosody"}
+                    rng.choice(pool),
+                    None,
+                    needs=self.needs & {"av", "ssl", "wave", "prosody", "syll"},
                 )
                 if replace_audio(item, other, targets, rng):
                     video["mismatch"] = 1.0
@@ -399,7 +420,7 @@ class BenchData(torch.utils.data.Dataset):
         return item
 
 
-FRAME_KEYS = ("a", "v", "ssl", "lips", "pose", "wave", "prosody", "head")
+FRAME_KEYS = ("a", "v", "ssl", "lips", "pose", "wave", "prosody", "head", "syll")
 
 
 def collate(batch):

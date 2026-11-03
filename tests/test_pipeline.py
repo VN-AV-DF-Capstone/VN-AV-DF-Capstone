@@ -570,6 +570,15 @@ def write_fake_caches(cfg, rows, dim=32):
             valid=np.ones(n, bool),
             times_s=np.arange(n) / 25,
         )
+        if (cache / "syll").is_dir():  # v006: một âm tiết mỗi 0,2 s (không dùng rng)
+            from vn_av_df.features.syllables import units
+
+            words = ["xin", "chào", "ông", "học", "một", "câu"]
+            spans = [
+                {"word": words[i % 6], "start": i * 0.2, "end": i * 0.2 + 0.15}
+                for i in range(int(n / 5))
+            ]
+            np.savez(cache / "syll" / f"{sid}.npz", syll=units(spans, n), valid=np.ones(n, bool))
 
 
 def test_every_model_forward_backward():
@@ -588,6 +597,13 @@ def test_every_model_forward_backward():
         "prosody": torch.randn(B, T, 5),
         "head": torch.randn(B, T, 5),
         "lipinc": torch.randint(0, 255, (B, 8, 64, 144, 3), dtype=torch.uint8),
+        "syll": torch.cat(
+            [
+                (torch.arange(T) % 5 == 0).float()[None, :, None].repeat(B, 1, 1),
+                torch.randint(1, 3, (B, T, 6)).float(),
+            ],
+            -1,
+        ),
         "speaker": torch.tensor([0, 1]),
         "mask": mask,
         "y_ai": torch.zeros(B, T),
@@ -638,6 +654,7 @@ def test_train_evaluate_report_smoke(world):
         "lipinc",
         "xlsr",
         "wave",
+        "syll",
     ]
     for name in encoders_for(cfg["models"]):
         (Path(cfg["cache"]) / name).mkdir(parents=True, exist_ok=True)

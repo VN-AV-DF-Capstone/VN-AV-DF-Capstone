@@ -27,7 +27,7 @@ from vn_av_df.dataset import media_path, training_dataset
 from vn_av_df.progress import Progress, duration, system_status
 from vn_av_df.training.data import cache_file, cache_roots
 
-ORDER = ("landmarks", "avhubert", "mouth", "lipinc", "xlsr", "wave")
+ORDER = ("landmarks", "avhubert", "mouth", "lipinc", "xlsr", "wave", "syll")
 # needs của model → encoder phải có (avhubert, mouth, lipinc đọc landmark / hộp miệng từ landmarks).
 NEEDS = {
     "av": ("landmarks", "avhubert"),
@@ -37,6 +37,7 @@ NEEDS = {
     "ssl": ("xlsr",),
     "wave": ("wave",),
     "prosody": ("landmarks", "avhubert", "mouth", "wave"),  # M3: ngữ điệu ↔ đầu (prosody.py)
+    "syll": ("syll",),  # v006: PhoWhisper trên tiếng của mẫu (features/syllables.py)
 }
 
 
@@ -84,6 +85,10 @@ def make(cfg, name, device):
         from vn_av_df.features.encoders import WaveEncoder
 
         return WaveEncoder(spec)
+    if name == "syll":
+        from vn_av_df.features.syllables import SyllableEncoder
+
+        return SyllableEncoder(spec)
     raise ValueError(f"Unknown encoder {name}")
 
 

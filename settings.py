@@ -169,6 +169,26 @@ TRAIN_SESSIONS = {
 # Đội hình đầy đủ: notebook in model nào chưa train xong; report gồm các model đã có (cổng thiếu
 # model thì bỏ qua).
 TEST_MODELS = MODELS + ABLATIONS
+# v005 · M5 và v006 · M6 (docs/v005-v006_de-xuat-detector.md, docs/v006_sau-review.md): đã có code,
+# chưa train. Script src/models/v005|v006 gọi bootstrap("v005" | "v006"): đổi đội hình, seed, thư
+# mục run và dùng protocol của M1-v003 (so M5 / M6 − M1-v003 cùng dữ liệu, cùng cách dừng sớm):
+# nhãn mismatch theo cách tạo, dịch tiếng −1…+2, chọn checkpoint theo val loss, lr cố định, XLS-R 3
+# nhóm lớp (cache v003). Nấc 1 chỉ train part 1; trihead_v2 (M1-v003) không train lại.
+VERSIONS = {
+    "v005": {
+        "models": ["trihead_v3"],
+        "ablations": ["trihead_v3_p1", "trihead_v3_p123"],  # cộng dồn: +P1, +P1-P3
+        "seeds": [42],
+        "run_name": "train_part1_v005",
+    },
+    "v006": {
+        "models": ["visyl"],
+        "ablations": ["visyl_no_phon", "visyl_uniform_no_phon", "visyl_shuffled_tags"],
+        "seeds": [42, 43, 44, 45, 46],
+        "run_name": "train_part1_v006",
+    },
+}
+VERSION = None  # bootstrap(version) đặt
 # Python của từng môi trường worker (environments/worker_envs.py in ra đường dẫn sau khi cài).
 ENVS = {}
 AVH_PYTHON = os.environ.get(
@@ -335,6 +355,8 @@ def config():
         "mouth": {"kind": "mouth", "crop": 96, "box_max_side": 640, "cpu_only": True},
         "lipinc": {"kind": "lipinc", "box_max_side": 640, "cpu_only": True},
         "wave": {"kind": "wave", "cpu_only": True},
+        # v006: PhoWhisper trên tiếng của mẫu → đơn vị âm tiết + thẻ (features/syllables.py).
+        "syll": {"kind": "syll", "model": "vinai/PhoWhisper-small", "device": DEVICE},
     }
     # Tài sản dựng model: XLS-R gốc cho BL-A fine-tune; checkpoint AVH-Align công bố (train trên
     # 45 k video real AV-1M, commit đã pin) để khởi tạo BL-M và Φ của M2.
@@ -344,10 +366,21 @@ def config():
         "avh_align_url": "https://raw.githubusercontent.com/bit-ml/AVH-Align/"
         "55401ded7d94a6ad59106c401696d89ce8d16faf/checkpoints/AVH-Align_AV1M.pt",
     }
+    if VERSION:
+        version = VERSIONS[VERSION]
+        cfg["models"] = version["models"] + version["ablations"]
+        cfg["seeds"] = version["seeds"]
+        cfg["runs"] = str(ROOT / "runs" / version["run_name"])
+        cfg["training"].update(audio_lag_aug=[-1, 2], monitor="loss", scheduler=None)
+        cfg["mismatch_labels"] = {"mode": "construction"}
+        cfg["encoders"]["xlsr"]["layer_groups"] = [[1, 4], [5, 8], [9, 12]]
     return cfg
 
 
-def bootstrap():
+def bootstrap(version=None):
+    """version: "v005" | "v006" cho script src/models/<version>/ (xem VERSIONS)."""
+    global VERSION
+    VERSION = version
     sys.dont_write_bytecode = True
     os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
     sys.path[:0] = [str(ROOT / "src"), str(ROOT / "src/data/preparation")]

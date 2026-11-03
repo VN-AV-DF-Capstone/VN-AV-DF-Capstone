@@ -21,6 +21,9 @@ Báo cáo:
 - BL-Ens (không train): max(BL-V, BL-A) sau khi chuẩn hoá điểm mỗi model theo clip real validation
   (z-score), cho tác vụ ai; visual = BL-V, audio = BL-A. Model chỉ có điểm video (frame_level =
   False, LIPINC-V2) không có phép đo định vị.
+- v005 (mọi model, để so cùng hậu xử lý): P4 `postprocess_p4` = AI? max(z_visual, z_audio) sau
+  chuẩn hoá theo real val và 3 clip tham chiếu; P6 `localization_p6` = định vị theo ngưỡng cố định
+  chọn trên val, AP trên partial + real theo tầng (đoạn ngẫu nhiên / theo biên từ / ≤ 0,6 s).
 Kết quả: `<run>/<model>_seed<seed>/metrics.json`, `predictions-{val,test}.npz`; `evaluation.json`
 gộp mọi model đã chấm; `test-log.json`.
 """
@@ -570,6 +573,164 @@ def shift_robustness(model, cfg, val_rows, test_rows, device, val_pred, test_pre
     return out
 
 
+# ---------------------------------------------------------------- v005 P4, P6 (dùng chung mọi model)
+def logit(p):
+    p = np.clip(np.asarray(p, float), 1e-6, 1 - 1e-6)
+    return np.log(p / (1 - p))
+
+
+def p4_scores(rows, scores, stats, count):
+    """z = (logit điểm − μ) / σ theo real validation cho visual và audio, trừ trung bình z của
+    `count` clip real tham chiếu cùng người (không chia độ lệch chuẩn); AI? = max hai đầu. Bỏ clip
+    tham chiếu và mọi mẫu sinh từ chúng (như ref_norm)."""
+    references = enrollment(rows, count)
+    used = {r["source_clip_id"] for refs in references.values() for r in refs}
+    z = {
+        t: {sid: (logit(v) - stats[t][0]) / stats[t][1] for sid, v in scores[t].items()}
+        for t in ("visual", "audio")
+    }
+    center = {
+        key: {t: float(np.mean([z[t][r["sample_id"]] for r in refs])) for t in z}
+        for key, refs in references.items()
+        if refs
+    }
+    out = {}
+    for r in rows:
+        key = (r["split"], r.get("speaker_id"))
+        if r.get("source_clip_id") not in used and key in center:
+            out[r["sample_id"]] = float(max(z[t][r["sample_id"]] - center[key][t] for t in z))
+    return out
+
+
+def p4_metrics(cfg, val_rows, test_rows, val_all, test_all, seen):
+    """v005 P4 (docs/v005-v006_de-xuat-detector.md §2.3): AI? = max(z_visual, z_audio) sau chuẩn hoá
+    theo real val và 3 clip tham chiếu cùng người; so với điểm thô trên đúng tập còn lại."""
+    if not all({"visual", "audio", "ai"} <= set(s) for s in (val_all, test_all)):
+        return None
+    reals = [r["sample_id"] for r in val_rows if r.get("cell") == "real"]
+    if not reals:
+        return None
+    stats = {}
+    for t in ("visual", "audio"):
+        x = logit([val_all[t][s] for s in reals])
+        stats[t] = (float(x.mean()), float(x.std()) + 1e-6)
+    count = cfg["generation"]["references"]
+    val_s = p4_scores(val_rows, val_all, stats, count)
+    test_s = p4_scores(test_rows, test_all, stats, count)
+    val_kept = [r for r in val_rows if r["sample_id"] in val_s]
+    test_kept = [r for r in test_rows if r["sample_id"] in test_s]
+    result = task_metrics(cfg, val_kept, test_kept, val_s, test_s, "ai", seen)
+    if result is None:
+        return None
+    result.pop("ref_norm", None)
+    kept = known(test_kept, "ai")
+    result["samples"] = len(kept)
+    result["auc_raw_same_set"] = auc(
+        [target(r, "ai") for r in kept], [test_all["ai"][r["sample_id"]] for r in kept]
+    )
+    return result
+
+
+# Tầng định vị P6: đoạn ngẫu nhiên (tầng chính) và đoạn theo biên từ (biên = mốc ASR của bước sinh).
+P6_TIERS = {
+    "random": (("sham", "source", "donor"), None),
+    "word": (("voice", "both"), None),
+    "random_short": (("sham", "source", "donor"), 0.6),
+}
+
+
+def runs_above(scores, threshold, min_frames=2):
+    above = np.asarray(scores) >= threshold
+    edges = np.flatnonzero(np.diff(np.r_[0, above.astype(int), 0]))
+    return [(s, e) for s, e in zip(edges[::2], edges[1::2]) if e - s >= min_frames]
+
+
+def voc_ap(pool, truth, threshold):
+    """AP kiểu VOC (mỗi đoạn thật khớp tối đa một lần) + các cặp (đoán, thật) đã khớp."""
+    total = sum(len(v) for v in truth.values())
+    used, hits, pairs = set(), [], []
+    for _, sid, a, b in sorted(pool, key=lambda p: -p[0]):
+        best, match = threshold, None
+        for k, span in enumerate(truth[sid]):
+            overlap = iou((a, b), span)
+            if (sid, k) not in used and overlap >= best:
+                best, match = overlap, (sid, k)
+        hits.append(match is not None)
+        if match is not None:
+            used.add(match)
+            pairs.append(((a, b), truth[sid][match[1]]))
+    if not hits or not total:
+        return 0.0, pairs
+    hits = np.asarray(hits, float)
+    tp = np.cumsum(hits)
+    precision, recall = tp / np.arange(1, len(hits) + 1), tp / total
+    envelope = np.maximum.accumulate(precision[::-1])[::-1]
+    return float((envelope * np.diff(np.r_[0.0, recall])).sum()), pairs
+
+
+def p6_localization(model, val_rows, val_pred, test_rows, test_pred, task):
+    """v005 P6 (hàm mới; temporal_metrics / proposals() giữ nguyên để số cũ so được): ngưỡng frame
+    cố định = max F1 trên frame validation (partial + real); đoạn = khúc ≥ 2 frame vượt ngưỡng, điểm
+    = trung bình frame; thêm đoạn cả clip khi điểm video ≥ ngưỡng video (max F1 trên validation).
+    AP chỉ trên partial + real (bỏ full), theo tầng P6_TIERS; sai số biên (ms) của đoạn khớp IoU ≥ 0,5."""
+
+    def usable(row):
+        return row.get("kind") == "partial" or row.get("cell") == "real"
+
+    labels, values, video_labels, video_values = [], [], [], []
+    for row in filter(usable, val_rows):
+        pred = val_pred[row["sample_id"]]
+        scores, spans = frame_head(model, pred, task), intervals(row, task)
+        if scores is None:
+            return None
+        if spans is None:
+            continue
+        truth = np.zeros(len(scores), bool)
+        for a, b in spans:
+            truth[int(round(a * 25)) : int(round(b * 25))] = True
+        labels.extend(truth.tolist())
+        values.extend(np.asarray(scores, float).tolist())
+        video_labels.append(int(bool(spans)))
+        video_values.append(task_scores(model, pred).get(task))
+    if len(set(labels)) < 2:
+        return None
+    frame_t = best_threshold(labels, values)
+    video_t = (
+        best_threshold(video_labels, video_values)
+        if len(set(video_labels)) == 2 and None not in video_values
+        else float("inf")
+    )
+    out = {"frame_threshold": frame_t, "video_threshold": video_t, "tiers": {}}
+    for tier, (cells, longest) in P6_TIERS.items():
+        pool, truth = [], {}
+        for row in filter(usable, test_rows):
+            if row.get("cell") != "real" and row.get("cell") not in cells:
+                continue
+            spans = intervals(row, task)
+            if spans is None or (longest and any(b - a > longest for a, b in spans)):
+                continue
+            sid = row["sample_id"]
+            truth[sid] = [tuple(s) for s in spans]
+            scores = np.asarray(frame_head(model, test_pred[sid], task), float)
+            for s, e in runs_above(scores, frame_t):
+                pool.append((float(scores[s:e].mean()), sid, s * 0.04, e * 0.04))
+            video = task_scores(model, test_pred[sid]).get(task)
+            if video is not None and video >= video_t:
+                pool.append((float(video), sid, 0.0, len(scores) * 0.04))
+        segments = sum(len(v) for v in truth.values())
+        if not segments:
+            out["tiers"][tier] = None
+            continue
+        entry = {"segments": segments, "clips": len(truth)}
+        for threshold in (0.5, 0.75):
+            entry[f"ap@{threshold:g}"], pairs = voc_ap(pool, truth, threshold)
+            if threshold == 0.5:
+                errors = [abs(p[0] - t[0]) + abs(p[1] - t[1]) for p, t in pairs]
+                entry["boundary_error_ms"] = float(np.mean(errors) * 500) if errors else None
+        out["tiers"][tier] = entry
+    return out
+
+
 def evaluate_model(cfg, model_dir, rows, device, seen):
     model = load_model(Path(model_dir) / "best.pt", device)
     val_rows = [r for r in rows if r["split"] == "validation"]
@@ -591,7 +752,11 @@ def evaluate_model(cfg, model_dir, rows, device, seen):
         if model.frame_level:  # v004: cả mismatch (đoạn lệch tiếng-môi)
             result["localization"] = localization(model, test_rows, test_pred, task)
             result["temporal"] = temporal_metrics(model, test_rows, test_pred, task)
+            result["localization_p6"] = p6_localization(
+                model, val_rows, val_pred, test_rows, test_pred, task
+            )
         metrics["tasks"][task] = result
+    metrics["postprocess_p4"] = p4_metrics(cfg, val_rows, test_rows, val_all, test_all, seen)
     kinds = manipulation_type(model, test_rows, test_pred)
     if kinds is not None:
         metrics["manipulation_type"] = kinds

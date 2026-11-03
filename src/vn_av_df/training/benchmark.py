@@ -67,6 +67,9 @@ def synthetic_batch(model, size, frames, dim, device, speakers=24):
         batch["mouth"] = torch.randint(0, 255, (size, frames, 96, 96), dtype=torch.uint8)
     if "wave" in needs:
         batch["wave"] = torch.randn(size, frames, 640) * 0.1
+    if "syll" in needs:  # v006: đơn vị 5 frame, thẻ ngẫu nhiên (chỉ số 1 = không phải đệm)
+        batch["syll"] = torch.randint(1, 3, (size, frames, 7)).float()
+        batch["syll"][..., 0] = (torch.arange(frames) % 5 == 0).float()
     if "lipinc" in needs:
         batch["lipinc"] = torch.randint(0, 255, (size, 8, 64, 144, 3), dtype=torch.uint8)
     if model.references:

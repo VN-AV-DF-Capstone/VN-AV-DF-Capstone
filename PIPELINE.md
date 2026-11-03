@@ -8,7 +8,7 @@ src/data (real, local) ─► part sạch vn-av-df-data-partN (600-800 clip, 20 
   └─► notebooks/train.ipynb      train theo bước (settings.TRAIN_GROUPS): baseline, M1, M2, M3 + ablation → test → report.md  (src/models/v004/02-04)
 ```
 
-Mỗi bước chạy được ở local bằng script trong `src/generators/` và `src/models/v004/` (v003: `src/models/v003/`, cùng lệnh), hoặc trên Kaggle bằng notebook tương ứng; cả hai cách gọi cùng các lệnh trong `src/vn_av_df/cli.py`. Cấu hình nằm ở `settings.py` (local) và các cell đầu của notebook (Kaggle). Pipeline dữ liệu real: [src/data/README.md](src/data/README.md).
+Mỗi bước chạy được ở local bằng script trong `src/generators/` và `src/models/v004/` (v003: `src/models/v003/`; v005, v006 chỉ chạy local: `src/models/v005/`, `src/models/v006/` với đội hình và protocol riêng, xem [src/models/README.md](src/models/README.md)), hoặc trên Kaggle bằng notebook tương ứng; cả hai cách gọi cùng các lệnh trong `src/vn_av_df/cli.py`. Cấu hình nằm ở `settings.py` (local) và các cell đầu của notebook (Kaggle). Pipeline dữ liệu real: [src/data/README.md](src/data/README.md).
 
 | Bước | Script local | Code (trong `src/vn_av_df/`) |
 |---|---|---|
