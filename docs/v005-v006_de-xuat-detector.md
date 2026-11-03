@@ -1,6 +1,6 @@
 # Đề xuất detector v005 và v006
 
-> **Code (03/11/2026):** v005 · M5 = `trihead_v3` (+ `trihead_v3_p1`, `trihead_v3_p123`), P4 / P6 trong `evaluate.py`; v006 · M6 = `visyl` (+ 3 ablation), `features/syllables.py`; chạy bằng `src/models/v005/`, `src/models/v006/`. P5 và các bước nấc 0 chưa làm. Chưa train, chưa đo trên dữ liệu thật; bản sao của file đề xuất trong project, giữ nguyên nội dung.
+> **Code (03/11/2026):** v005 · M5 = `trihead_v3` (+ `trihead_v3_p1`, `trihead_v3_p123`), P4 / P6 trong `evaluate.py`; v006 · M6 = `visyl` (+ 3 ablation), `features/syllables.py`; chạy bằng `src/models/v005/`, `src/models/v006/`. P5 và các bước nấc 0 chưa làm. Cách train theo v004 của Linh (nhãn mismatch đo được, dịch tiếng −2…+5, chọn theo val AUC), không theo protocol v003 ghi trong file này (MN chốt 03/11). Chưa train, chưa đo trên dữ liệu thật; bản sao của file đề xuất trong project, giữ nguyên nội dung.
 
 Ngày 30/10/2026 · viết cho MN và team VN-AV-DF-Capstone
 

@@ -170,22 +170,21 @@ TRAIN_SESSIONS = {
 # model thì bỏ qua).
 TEST_MODELS = MODELS + ABLATIONS
 # v005 · M5 và v006 · M6 (docs/v005-v006_de-xuat-detector.md, docs/v006_sau-review.md): đã có code,
-# chưa train. Script src/models/v005|v006 gọi bootstrap("v005" | "v006"): đổi đội hình, seed, thư
-# mục run và dùng protocol của M1-v003 (so M5 / M6 − M1-v003 cùng dữ liệu, cùng cách dừng sớm):
-# nhãn mismatch theo cách tạo, dịch tiếng −1…+2, chọn checkpoint theo val loss, lr cố định, XLS-R 3
-# nhóm lớp (cache v003). Nấc 1 chỉ train part 1; trihead_v2 (M1-v003) không train lại.
+# chưa train. Script src/models/v005|v006 gọi bootstrap("v005" | "v006"): chỉ đổi đội hình, seed và
+# thư mục run; cách train như v004 của Linh (nhãn mismatch `mismatch_labels`, dịch tiếng −2…+5,
+# chọn checkpoint theo val AUC, plateau, XLS-R 5 nhóm lớp) để so được với M1, M3 train lại ở v004.
 VERSIONS = {
     "v005": {
         "models": ["trihead_v3"],
         "ablations": ["trihead_v3_p1", "trihead_v3_p123"],  # cộng dồn: +P1, +P1-P3
         "seeds": [42],
-        "run_name": "train_part1_v005",
+        "run_name": "train_all_v005",
     },
     "v006": {
         "models": ["visyl"],
         "ablations": ["visyl_no_phon", "visyl_uniform_no_phon", "visyl_shuffled_tags"],
         "seeds": [42, 43, 44, 45, 46],
-        "run_name": "train_part1_v006",
+        "run_name": "train_all_v006",
     },
 }
 VERSION = None  # bootstrap(version) đặt
@@ -371,9 +370,6 @@ def config():
         cfg["models"] = version["models"] + version["ablations"]
         cfg["seeds"] = version["seeds"]
         cfg["runs"] = str(ROOT / "runs" / version["run_name"])
-        cfg["training"].update(audio_lag_aug=[-1, 2], monitor="loss", scheduler=None)
-        cfg["mismatch_labels"] = {"mode": "construction"}
-        cfg["encoders"]["xlsr"]["layer_groups"] = [[1, 4], [5, 8], [9, 12]]
     return cfg
 
 

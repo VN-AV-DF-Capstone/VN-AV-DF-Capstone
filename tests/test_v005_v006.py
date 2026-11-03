@@ -129,6 +129,28 @@ def test_visyl_scores_are_constant_within_units():
     assert zoo.build("visyl_uniform_no_phon", dim=16, hidden=16).needs == {"av", "ssl"}
 
 
+def test_visyl_visual_head_ignores_constant_audio_lag():
+    """Như v004: trượt tiếng cả clip (trong ±15, không chạm mép) không đổi đặc trưng sync của đường
+    gộp, chỉ đổi độ trễ chung ĝ đưa vào đầu mismatch."""
+    from vn_av_df.training import models as zoo
+
+    torch.manual_seed(0)
+    model = zoo.build("visyl", dim=16, hidden=16).eval()
+    T, k = 80, 3
+    a = torch.randn(1, T + 20, 16)
+    v = a + 0.1 * torch.randn_like(a)
+    mask = torch.ones(1, T, dtype=torch.bool)
+    ids = (torch.arange(T) // 5)[None]
+    assign = __import__("vn_av_df.training.models", fromlist=["x"]).unit_assign(ids, mask)
+    base, g0 = model.profile(a[:, 10 : 10 + T], v[:, 10 : 10 + T], mask, assign)
+    moved, g1 = model.profile(a[:, 10 - k : 10 - k + T], v[:, 10 : 10 + T], mask, assign)
+    inner = slice(4, 12)  # đơn vị giữa clip, xa mép
+    # khác nhau chỉ ở k ô độ trễ rơi ra ngoài cửa sổ ±15 (và entropy tính trên cửa sổ đó)
+    keep = list(range(k, 31 - k)) + [31, 32]
+    assert torch.allclose(base[0, inner][:, keep], moved[0, inner][:, keep], atol=1e-5)
+    assert abs(float(g1 - g0) * 15) == pytest.approx(k)
+
+
 def test_p6_perfect_scorer_and_p4_reference_centering():
     from vn_av_df.training import evaluate as ev
 
@@ -184,18 +206,17 @@ def test_p6_perfect_scorer_and_p4_reference_centering():
     assert p4["test-source-2"] > 0
 
 
-def test_version_bootstrap_uses_v003_protocol():
+def test_version_bootstrap_keeps_v004_training_protocol():
     import settings
 
+    base = settings.config()
     try:
         settings.bootstrap("v006")
         cfg = settings.config()
         assert cfg["models"][0] == "visyl" and cfg["seeds"] == [42, 43, 44, 45, 46]
-        assert cfg["runs"].endswith("train_part1_v006")
-        assert cfg["training"]["audio_lag_aug"] == [-1, 2]
-        assert cfg["training"]["monitor"] == "loss" and cfg["training"]["scheduler"] is None
-        assert cfg["mismatch_labels"]["mode"] == "construction"
-        assert len(cfg["encoders"]["xlsr"]["layer_groups"]) == 3
+        assert cfg["runs"].endswith("train_all_v006")
+        for key in ("training", "mismatch_labels", "encoders"):
+            assert cfg[key] == base[key]  # cách train như v004
     finally:
         settings.VERSION = None
     assert settings.config()["models"] == settings.MODELS + settings.ABLATIONS

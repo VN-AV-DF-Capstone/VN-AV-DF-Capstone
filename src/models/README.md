@@ -11,10 +11,10 @@
 
 ## v005, v006 (đã có code, chưa train)
 
-Script ở `v005/`, `v006/` giống v003 nhưng gọi `bootstrap("v005" | "v006")` (`settings.VERSIONS`): đội hình riêng, run ở `runs/train_part1_v005|v006`, protocol của M1-v003 để so cùng điều kiện (nhãn mismatch theo cách tạo, dịch tiếng −1…+2, chọn theo val loss, lr cố định, XLS-R 3 nhóm lớp như cache v003). v006 cần thêm cache `syll`: `src/models/v006/01_prepare.py --encoders syll` (PhoWhisper trên tiếng từng mẫu).
+Script ở `v005/`, `v006/` giống v003 nhưng gọi `bootstrap("v005" | "v006")` (`settings.VERSIONS`): đội hình, seed và thư mục run riêng (`runs/train_all_v005|v006`); cách train giữ như v004 của Linh (nhãn mismatch đo được theo `mismatch_labels`, dịch tiếng −2…+5, chọn checkpoint theo val AUC, plateau, XLS-R 5 nhóm lớp), để so cùng điều kiện với M1, M3 train lại ở v004. Đổi luật nhãn mismatch trong `settings.py` thì v004, v005, v006 đổi cùng nhau. v006 cần thêm cache `syll`: `src/models/v006/01_prepare.py --encoders syll` (PhoWhisper trên tiếng từng mẫu).
 
-- v005: `TriHeadV3` trong `models.py` (P1 `PureSyncTrunk`, P2 `VisualTrunk`, P3 mỗi đầu một nhánh, P4 bỏ FiLM). P4 (`postprocess_p4`) và P6 (`localization_p6`) tính trong `evaluate.py` cho **mọi** model, để M1-v003 chấm lại (`03_evaluate.py --force`) cùng hậu xử lý. Chưa có: P5 (front-end giọng, chờ zero-shot), cổng G1-G7 trong `report.py`.
-- v006: `ViSyl` trong `models.py`, `features/syllables.py` (luật chính tả → thẻ, đơn vị âm tiết), pseudo-fake theo đơn vị trong `data.replace_audio`. Chưa có: bước 0 (0b' chọn bộ căn, 0c' pilot khép môi), hình học môi và kỳ vọng theo người, phép đảo thẻ lúc suy luận, cổng G1-G8.
+- v005: `TriHeadV3` trong `models.py` (P1 `PureSyncTrunk`, P2 `VisualTrunk`, P3 mỗi đầu một nhánh, P4 bỏ FiLM). P4 (`postprocess_p4`) và P6 (`localization_p6`) tính trong `evaluate.py` cho **mọi** model, để M1-v003 chấm lại (`03_evaluate.py --force`) cùng hậu xử lý. Với P3, đầu visual của M5 chỉ nhận nhánh V (không có tiếng) nên không thấy độ trễ. Chưa có: P5 (front-end giọng, chờ zero-shot), cổng G1-G7 trong `report.py`.
+- v006: `ViSyl` trong `models.py` (như v004: đường gộp, tức đầu visual, chỉ thấy hồ sơ khớp đã dời về độ trễ chung của clip; độ trễ chung chỉ vào đầu mismatch), `features/syllables.py` (luật chính tả → thẻ, đơn vị âm tiết), pseudo-fake theo đơn vị trong `data.replace_audio`. Chưa có: bước 0 (0b' chọn bộ căn, 0c' pilot khép môi), hình học môi và kỳ vọng theo người, phép đảo thẻ lúc suy luận, cổng G1-G8.
 
 ## v004 (đang dùng)
 

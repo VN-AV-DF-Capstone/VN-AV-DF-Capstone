@@ -1,6 +1,6 @@
 # v006 · M6 "ViSyl" sau review
 
-> **Code (03/11/2026):** M6 = `visyl`, `visyl_no_phon`, `visyl_uniform_no_phon`, `visyl_shuffled_tags` (`training/models.py`), cache `syll` (`features/syllables.py`, bộ căn PhoWhisper DTW), pseudo-fake theo đơn vị (`data.replace_audio`), P4 / P6 (`evaluate.py`). Chưa có: hình học môi và kỳ vọng theo người (chờ 0c'), phép đảo thẻ lúc suy luận, cổng G1-G8 trong `report.py`. Chưa train, chưa đo trên dữ liệu thật; bản sao của file đề xuất trong project, giữ nguyên nội dung.
+> **Code (03/11/2026):** M6 = `visyl`, `visyl_no_phon`, `visyl_uniform_no_phon`, `visyl_shuffled_tags` (`training/models.py`), cache `syll` (`features/syllables.py`, bộ căn PhoWhisper DTW), pseudo-fake theo đơn vị (`data.replace_audio`), P4 / P6 (`evaluate.py`). Chưa có: hình học môi và kỳ vọng theo người (chờ 0c'), phép đảo thẻ lúc suy luận, cổng G1-G8 trong `report.py`. Cách train theo v004 của Linh (nhãn mismatch đo được, dịch tiếng −2…+5, chọn theo val AUC), không theo protocol v003 ghi trong file này (MN chốt 03/11). Chưa train, chưa đo trên dữ liệu thật; bản sao của file đề xuất trong project, giữ nguyên nội dung.
 
 Ngày 30/10/2026 · viết cho MN và team VN-AV-DF-Capstone
 

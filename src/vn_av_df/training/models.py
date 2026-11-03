@@ -1652,7 +1652,7 @@ class ViSyl(Model):
     """M6 (v006) "ViSyl": detector neo theo âm tiết tiếng Việt (docs/v006_sau-review.md §2).
 
     Đơn vị = âm tiết từ cache `syll` (features/syllables.py) + khoảng lặng; mỗi đơn vị gộp frame
-    bằng attention pooling. Đường gộp [v, a, hồ sơ cosine ±15 (34), thẻ khẩu hình (5 × 8), vị trí]
+    bằng attention pooling. Đường gộp [v, a, hồ sơ cosine ±15 tương đối (34), thẻ khẩu hình (5 × 8), vị trí]
     → 2 lớp Transformer → đầu visual, mismatch (không thấy XLS-R). Đường tiếng [a, XLS-R, thanh,
     loại đơn vị, vị trí] → 1 lớp → đầu audio. Điểm đơn vị gán lại cho mọi frame của đơn vị.
 
@@ -1707,7 +1707,7 @@ class ViSyl(Model):
 
         self.fused, self.audio = encoder(2), encoder(1)
         self.visual_head = mlp_head(hidden, hidden // 2)
-        self.mismatch_head = mlp_head(hidden, hidden // 2)
+        self.mismatch_head = mlp_head(hidden + 1, hidden // 2)  # + độ trễ chung ĝ
         self.audio_head = mlp_head(hidden, hidden // 2)
 
     def rebuild_assets(self):
@@ -1724,17 +1724,29 @@ class ViSyl(Model):
         return start.long().cumsum(1) - 1
 
     def profile(self, a, v, mask, assign):
-        """Hồ sơ cos(a_t, v_t+δ), δ ∈ [−15, 15], trung bình theo đơn vị + đỉnh, vị trí đỉnh, entropy."""
+        """Hồ sơ cos(v_t, a_t+δ), δ ∈ [−15, 15], trung bình theo đơn vị + đỉnh, vị trí đỉnh, entropy.
+
+        Theo v004 (SyncTrunkV4): hồ sơ dời về độ trễ chung của clip ĝ (đỉnh của hồ sơ trung bình cả
+        clip), nên đường gộp, tức cả đầu visual, không thấy độ trễ tuyệt đối (chặn lối tắt "trễ ⇒
+        giả" khi dịch tiếng −2…+5); ĝ / 15 chỉ vào đầu mismatch. Trả (đặc trưng [B, U, 34], ĝ [B])."""
         ca, cv = F.normalize(a, dim=-1), F.normalize(v, dim=-1)
         rng = range(-MAX_LAG, MAX_LAG + 1)
         valid = torch.stack([shift(mask, d) for d in rng], -1) & mask[..., None]
-        cos = torch.stack([(ca * shift(cv, d)).sum(-1) for d in rng], -1) * valid
+        # Cùng quy ước v004: δ ↔ (hình t, tiếng t + δ), neo theo frame hình.
+        cos = torch.stack([(cv * shift(ca, d)).sum(-1) for d in rng], -1) * valid
+        clip = cos.sum(1) / valid.sum(1).clamp(min=1)
+        offset = clip.argmax(-1) - MAX_LAG  # [B], frame
+        index = torch.arange(len(self.lags), device=a.device)[None] + offset[:, None]
+        inside = ((index >= 0) & (index < len(self.lags)))[:, None]
         prof = unit_mean(cos, assign)
+        prof = prof.gather(-1, index.clamp(0, len(self.lags) - 1)[:, None].expand_as(prof))
+        prof = prof * inside
         weights = (prof / 0.1).softmax(-1)  # nhiệt độ 0,1: cos nằm trong [−1, 1]
         entropy = -(weights * weights.clamp(min=1e-8).log()).sum(-1, keepdim=True)
         peak = prof.amax(-1, keepdim=True)
         where = self.lags[prof.argmax(-1)][..., None] / MAX_LAG
-        return torch.cat([prof, peak, where, entropy / math.log(len(self.lags))], -1)
+        feature = torch.cat([prof, peak, where, entropy / math.log(len(self.lags))], -1)
+        return feature, offset.to(a.dtype) / MAX_LAG
 
     def tags(self, batch, assign, names, unit_valid):
         codes = batch["syll"][..., [self.columns[k] for k in names]].long()
@@ -1762,7 +1774,8 @@ class ViSyl(Model):
         times = torch.arange(mask.shape[1], device=mask.device, dtype=a.dtype)
         center = unit_mean(times[None, :, None].expand(len(mask), -1, 1), assign)[..., 0]
         position = (center / mask.sum(1, keepdim=True).clamp(min=1))[..., None]
-        fused = [self.pool_v(v, assign), a_u, self.profile(a, v, mask, assign), position]
+        sync, offset = self.profile(a, v, mask, assign)
+        fused = [self.pool_v(v, assign), a_u, sync, position]
         audio = [a_u, self.pool_ssl(ssl, assign), position]
         if self.use_units:
             audio.append(self.tags(batch, assign, self.audio_tags, unit_valid))
@@ -1776,7 +1789,9 @@ class ViSyl(Model):
         index = ids.clamp(max=assign.shape[1] - 1)
         return {
             "visual": self.visual_head(h)[..., 0].gather(1, index),
-            "mismatch": self.mismatch_head(h)[..., 0].gather(1, index),
+            "mismatch": self.mismatch_head(
+                torch.cat([h, offset[:, None, None].expand(-1, h.shape[1], 1)], -1)
+            )[..., 0].gather(1, index),
             "audio": self.audio_head(g)[..., 0].gather(1, index),
         }
 
