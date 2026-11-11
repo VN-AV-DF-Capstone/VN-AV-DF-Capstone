@@ -1,4 +1,4 @@
-"""v005 (M5 trihead_v3, P4, P6) và v006 (M6 ViSyl, thẻ âm tiết): kiểm thành phần mới."""
+"""v006 (M6 trihead_v3, P4, P6) và v007 (M7 ViSyl, thẻ âm tiết): kiểm thành phần mới."""
 
 import random
 
@@ -129,6 +129,22 @@ def test_visyl_scores_are_constant_within_units():
     assert zoo.build("visyl_uniform_no_phon", dim=16, hidden=16).needs == {"av", "ssl"}
 
 
+def test_visyl_sham_is_a_visual_negative():
+    """Như M3-R (v005): clip sham thêm loss đẩy điểm visual về 0; mẫu khác không có thành phần này."""
+    from vn_av_df.training import models as zoo
+    from vn_av_df.training.benchmark import synthetic_batch
+
+    torch.manual_seed(0)
+    model = zoo.build("visyl", dim=16, hidden=16).train()
+    batch = synthetic_batch(model, 2, 30, 16, "cpu")
+    batch["cell_index"] = torch.tensor([zoo.CELL_CLASSES.index("real")] * 2)
+    model.loss(batch, model(batch))
+    assert "sham_visual" not in model.loss_parts
+    batch["cell_index"][1] = zoo.CELL_CLASSES.index("sham")
+    model.loss(batch, model(batch))
+    assert model.loss_parts["sham_visual"] > 0
+
+
 def test_visyl_visual_head_ignores_constant_audio_lag():
     """Như v004: trượt tiếng cả clip (trong ±15, không chạm mép) không đổi đặc trưng sync của đường
     gộp, chỉ đổi độ trễ chung ĝ đưa vào đầu mismatch."""
@@ -206,17 +222,17 @@ def test_p6_perfect_scorer_and_p4_reference_centering():
     assert p4["test-source-2"] > 0
 
 
-def test_version_bootstrap_keeps_v004_training_protocol():
+def test_version_bootstrap_keeps_v005_training_protocol():
     import settings
 
     base = settings.config()
     try:
-        settings.bootstrap("v006")
+        settings.bootstrap("v007")
         cfg = settings.config()
         assert cfg["models"][0] == "visyl" and cfg["seeds"] == [42, 43, 44, 45, 46]
-        assert cfg["runs"].endswith("train_all_v006")
-        for key in ("training", "mismatch_labels", "encoders"):
-            assert cfg[key] == base[key]  # cách train như v004
+        assert cfg["runs"].endswith("train_all_v007")
+        for key in ("training", "mismatch_labels", "encoders", "variant_specs"):
+            assert cfg[key] == base[key]  # cách train như v005 (gồm học bản nén)
     finally:
         settings.VERSION = None
     assert settings.config()["models"] == settings.MODELS + settings.ABLATIONS

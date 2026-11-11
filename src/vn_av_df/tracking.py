@@ -1,7 +1,7 @@
 """Log W&B: trích feature, train, test, báo cáo (kèm setup của phiên, setup_log.py) làm bằng chứng.
 
 Bật bằng cfg["wandb"] (notebook prepare / train đặt; project để private):
-    {"project": "vn-av-df-v004", "entity": None, "mode": "online"}
+    {"project": "vn-av-df-v005", "entity": None, "mode": "online"}
 Không đặt cfg["wandb"] thì mọi hàm ở đây không làm gì: local và test không cần cài wandb.
 Không đẩy ảnh / video người thật; chỉ số liệu, bảng, biểu đồ và file kết quả.
 
@@ -19,7 +19,7 @@ import numpy as np
 
 from vn_av_df.common.runtime import read_json, write_json
 
-PROJECT = "vn-av-df-v004"
+PROJECT = "vn-av-df-v005"
 
 
 class Run:
@@ -36,6 +36,13 @@ class Run:
         if self.active and data:
             clean = {k: v for k, v in data.items() if v is not None and not _nan(v)}
             self.run.log(clean, step=step) if step is not None else self.run.log(clean)
+
+    def step_axis(self, key):
+        """Mọi metric vẽ theo `key` (run train: "train/steps", điểm theo bước và điểm theo epoch chung một
+        trục). Log của run như vậy không truyền `step=`: W&B bỏ dữ liệu khi step tụt."""
+        if self.active:
+            self.run.define_metric(key)
+            self.run.define_metric("*", step_metric=key)
 
     def summary(self, data):
         if self.active:

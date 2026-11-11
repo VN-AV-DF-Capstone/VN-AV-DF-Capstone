@@ -1,6 +1,6 @@
-"""v006 · M6 (ViSyl): đơn vị âm tiết của tiếng mẫu + thẻ kỳ vọng khẩu hình suy từ chính tả.
+"""v007 · M7 (ViSyl): đơn vị âm tiết của tiếng mẫu + thẻ kỳ vọng khẩu hình suy từ chính tả.
 
-Thiết kế: docs/v006_sau-review.md §2.2-§2.3 (đề xuất, chưa train).
+Thiết kế: docs/v007_sau-review.md §2.2-§2.3 (đề xuất, chưa train).
 
 - Lời và mốc: PhoWhisper-small (generation/voice/asr.py) chạy trên tiếng 16 kHz của **chính mẫu**,
   mốc từng từ bằng DTW của Whisper. ASR được cache theo hash tiếng đã giải mã (thư mục

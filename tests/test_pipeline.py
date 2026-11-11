@@ -517,7 +517,7 @@ def test_batches_split_clips_across_sessions(world, tmp_path, monkeypatch):
     assert kinds == {"face"}
 
 
-def write_fake_caches(cfg, rows, dim=32):
+def write_fake_caches(cfg, rows, dim=32, ssl_groups=3):
     rng = np.random.default_rng(0)
     cache = Path(cfg["cache"])
     for row in rows:
@@ -540,7 +540,7 @@ def write_fake_caches(cfg, rows, dim=32):
         )
         np.savez(
             cache / "xlsr" / f"{sid}.npz",
-            ssl=rng.normal(size=(n, 3, 1024)).astype(np.float16),
+            ssl=rng.normal(size=(n, ssl_groups, 1024)).astype(np.float16),
             times_s=np.arange(n) / 25,
             valid=np.ones(n, bool),
         )
@@ -570,7 +570,7 @@ def write_fake_caches(cfg, rows, dim=32):
             valid=np.ones(n, bool),
             times_s=np.arange(n) / 25,
         )
-        if (cache / "syll").is_dir():  # v006: một âm tiết mỗi 0,2 s (không dùng rng)
+        if (cache / "syll").is_dir():  # v007 (M7): một âm tiết mỗi 0,2 s (không dùng rng)
             from vn_av_df.features.syllables import units
 
             words = ["xin", "chào", "ông", "học", "một", "câu"]
@@ -721,6 +721,11 @@ def test_train_evaluate_report_smoke(world):
     trains = {r.kwargs["name"].split(" ", 1)[1]: r for r in fake.by_type("train")}
     m1 = trains["trihead_v2_seed42"]
     assert {"loss/train", "val_auc/mismatch", "grad_norm"} <= m1.keys()
+    # Đường học theo bước: mọi metric vẽ theo train/steps; điểm loss theo bước + điểm epoch, train/steps tăng dần.
+    assert m1.axes == {"train/steps": None, "*": "train/steps"}
+    points = [e for e in m1.logged if "train/steps" in e]
+    assert any("step/loss" in e for e in points) and any("loss/train" in e for e in points)
+    assert [e["train/steps"] for e in points] == sorted(e["train/steps"] for e in points)
     assert "best_epoch" in m1.summary and m1.artifacts[0].type == "model"
     assert m1.kwargs["config"]["augment_lag"] and m1.kwargs["config"]["pseudo_fake"] > 0
     assert not trains["avh_align_seed42"].kwargs["config"]["augment_lag"]
@@ -836,7 +841,17 @@ def test_resume_after_interruption_and_provenance(world, tmp_path, monkeypatch):
     assert (out / "last.pt").is_file()
     assert not json.loads((out / "history.json").read_text(encoding="utf-8"))["complete"]
     monkeypatch.setattr(T, "run_epoch", original)
+    loads, torch_load = [], torch.load
+
+    def spy_load(path, *args, **kwargs):
+        if Path(path).name == "last.pt":
+            loads.append(kwargs.get("map_location"))
+        return torch_load(path, *args, **kwargs)
+
+    monkeypatch.setattr(torch, "load", spy_load)
     T.train_all(cfg)
+    # Trên GPU, nạp thẳng vào cuda làm trạng thái RNG hỏng ("RNG state must be a torch.ByteTensor").
+    assert loads == ["cpu"]
     history = json.loads((out / "history.json").read_text(encoding="utf-8"))
     assert history["complete"] and history["resumed_at"] == [2]
     assert [e["epoch"] for e in history["epochs"]] == [1, 2, 3]
@@ -912,8 +927,8 @@ def test_run_lanes_trains_in_subprocesses_and_merges(world, tmp_path, capsys):
     write_fake_caches(cfg, rows)
     assert run_lanes(cfg, [["avh_align_plus"], ["avh_align_sup"]]) == [0, 0]
     out = capsys.readouterr().out
-    assert "[GPU0]" in out and "[GPU1]" in out and "XONG" in out
-    assert "[GPU0] === TEST" in out and "[GPU1] === TEST" in out
+    assert "[L0/GPU" in out and "[L1/GPU" in out and "XONG" in out
+    assert "] === TEST" in out and out.count("=== TEST") >= 2
     assert missing_runs(cfg) == []
     assert not any(d.exists() for d in lane_dirs(cfg, 2))
     records = json.loads((Path(cfg["runs"]) / "provenance.json").read_text(encoding="utf-8"))
@@ -1023,3 +1038,34 @@ def test_benchmark_estimates_epoch_time(world, tmp_path):
             entry["max_hours_per_seed"] * len(cfg["seeds"])
         )
     assert (Path(cfg["runs"]) / "benchmark.json").is_file()
+
+
+def test_benchmark_builds_models_from_cache_ssl_groups(world, tmp_path):
+    """Cache XLS-R v004 có 5 nhóm lớp: benchmark phải dựng model theo cache như train."""
+    from vn_av_df.dataset import training_dataset
+    from vn_av_df.training.benchmark import benchmark
+
+    cfg = copy.deepcopy(world["cfg"])
+    cfg["runs"] = str(tmp_path / "runs")
+    cfg["cache"] = str(tmp_path / "cache")
+    for name in ("avhubert", "mouth", "lipinc", "xlsr", "wave"):
+        (Path(cfg["cache"]) / name).mkdir(parents=True, exist_ok=True)
+    rows, _ = training_dataset(cfg)
+    write_fake_caches(cfg, rows, ssl_groups=5)
+    models = [
+        "xlsr_frozen",
+        "avh_align",
+        "avh_align_sup",
+        "speechforensics",
+        "trihead_v2",
+        "avh_align_plus",
+        "trihead_v4",
+        "trihead_v4_no_prosody",
+        "trihead_v4_no_phi",
+        "trihead_v4_abs",
+        "trihead_v4_ref",
+    ]
+    report = benchmark(cfg, models, steps=1, warmup=0)
+    for name in models:
+        entry = report["models"][name]
+        assert entry["trainable"] is False or entry["error"] is None, name

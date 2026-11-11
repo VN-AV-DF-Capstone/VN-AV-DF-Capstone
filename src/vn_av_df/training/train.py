@@ -43,6 +43,9 @@ from vn_av_df.training.data import (
 )
 from vn_av_df.training.models import build
 
+# Số điểm loss train mỗi epoch trên W&B (trục train/steps); AUC validation vẫn một điểm mỗi epoch.
+STEP_POINTS = 50
+
 
 def feature_dim(cfg, rows):
     for row in rows:
@@ -120,8 +123,34 @@ def recipe(cfg, model):
     return options
 
 
+def variant_names(cfg, train=False, labelled=False):
+    """Biến thể có cache (cfg["variants"]) theo đặc tả cfg["variant_specs"]: train=True → biến thể
+    học khi train ("train": True); labelled=True → biến thể có đủ nhãn ở validation (mức nén; không
+    PR vì chỉ có real / sham / voice, không mức chỉ test) để chọn checkpoint."""
+    specs = cfg.get("variant_specs") or {}
+    names = []
+    for name in cfg.get("variants") or {}:
+        spec = specs.get(name, {})
+        if train and not spec.get("train", True):
+            continue
+        if labelled and (
+            spec.get("kind") == "processed_real"
+            or "validation" not in spec.get("splits", ["validation"])
+        ):
+            continue
+        names.append(name)
+    return names
+
+
 def loaders(cfg, model, rows, seed, train, options=None, speakers=None):
     options = options or recipe(cfg, model)
+    # Biến thể (cfg["variants"], v005): train lấy bản nén / PR với xác suất variant_p, hoặc
+    # theo cặp sạch + bản biến thể khi model học nhất quán (batch giữ cùng số mẫu: B/2 cặp).
+    learn = variant_names(cfg, train=True)
+    variants = None
+    if train and getattr(model, "train_variants", True) and learn:
+        variants = {n: cfg["variants"][n] for n in learn}
+    pair = bool(variants) and getattr(model, "consistency", 0) > 0
     data = BenchData(
         cfg,
         rows,
@@ -135,6 +164,9 @@ def loaders(cfg, model, rows, seed, train, options=None, speakers=None):
         pseudo_fake=model.pseudo_fake if train else 0.0,
         rawboost=train and model.rawboost,
         speakers=speakers,
+        variants=variants,
+        variant_p=float(options.get("variant_p", 0.0)) if variants else 0.0,
+        pair=pair,
     )
     generator = torch.Generator().manual_seed(seed)
     weights = speaker_weights(data.rows) if train and options.get("speaker_balance") else None
@@ -145,7 +177,7 @@ def loaders(cfg, model, rows, seed, train, options=None, speakers=None):
     )
     return data, torch.utils.data.DataLoader(
         data,
-        batch_size=options["batch_size"],
+        batch_size=max(1, options["batch_size"] // 2) if pair else options["batch_size"],
         shuffle=train and sampler is None,
         sampler=sampler,
         collate_fn=collate,
@@ -155,12 +187,25 @@ def loaders(cfg, model, rows, seed, train, options=None, speakers=None):
 
 
 def run_epoch(
-    model, loader, optimizer, device, weights, stats=None, clip=5.0, scaler=None, label=None
+    model,
+    loader,
+    optimizer,
+    device,
+    weights,
+    stats=None,
+    clip=5.0,
+    scaler=None,
+    label=None,
+    step_log=None,
 ):
     """Loss trung bình; `stats` (dict) nhận thêm trung bình từng thành phần loss + grad norm.
-    `label`: in tiến độ theo batch (batch đầu, rồi mỗi 60 s) kèm loss trung bình tới lúc đó."""
-    total, count = 0.0, 0
+    `label`: in tiến độ theo batch (batch đầu, rồi mỗi 60 s) kèm loss trung bình tới lúc đó.
+    `step_log` (train): {"run", "steps", "samples", "epoch", "every"}: mỗi `every` bước ghi W&B loss trung
+    bình của cửa sổ đó theo trục train/steps cộng dồn (bước / mẫu trước epoch này = "steps" / "samples").
+    Loss, grad norm đã đọc về CPU mỗi batch, nên chỉ thêm một lệnh log (W&B gửi ở tiến trình nền)."""
+    total, count, steps = 0.0, 0, 0
     parts, norms, skipped = Counter(), [], 0
+    window, window_parts, window_norms = [0.0, 0], Counter(), []
     model.train(optimizer is not None)
     amp = scaler is not None and str(device).startswith("cuda")
     progress = (
@@ -186,6 +231,7 @@ def run_epoch(
             # qua bước đó. Chỉ lấy trung bình norm hữu hạn, đếm riêng số bước tràn (BL-A, 25/10).
             if math.isfinite(norm):
                 norms.append(norm)
+                window_norms.append(norm)
             else:
                 skipped += 1
             if amp:
@@ -193,11 +239,30 @@ def run_epoch(
                 scaler.update()
             else:
                 optimizer.step()
+            steps += 1
         size = len(batch["index"])
-        total += float(loss.detach()) * size
+        batch_loss = float(loss.detach())
+        total += batch_loss * size
         count += size
         for key, value in (getattr(model, "loss_parts", None) or {}).items():
             parts[key] += value * size
+            window_parts[key] += value * size
+        window[0] += batch_loss * size
+        window[1] += size
+        if step_log and steps and steps % step_log["every"] == 0 and window[1]:
+            n = window[1]
+            step_log["run"].log(
+                {
+                    "train/steps": step_log["steps"] + steps,
+                    "train/samples": step_log["samples"] + count,
+                    "step/epoch": step_log["epoch"] - 1 + steps / max(1, len(loader)),
+                    "step/loss": window[0] / n,
+                    **{f"step/{k}": v / n for k, v in window_parts.items()},
+                    "step/grad_norm": float(np.mean(window_norms)) if window_norms else None,
+                    "step/lr": optimizer.param_groups[0]["lr"],
+                }
+            )
+            window, window_parts, window_norms = [0.0, 0], Counter(), []
         if progress:
             progress.step(note=f"loss {total / max(1, count):.4f}")
     if stats is not None:
@@ -206,6 +271,9 @@ def run_epoch(
             stats["grad_norm"] = float(np.mean(norms))
         if skipped:
             stats["grad_nonfinite_steps"] = skipped
+        if optimizer is not None:
+            # Trục so được với đường học theo step (harness local, paper): không đưa vào loss_train/.
+            stats["steps"], stats["samples"] = steps, count
     return total / max(1, count)
 
 
@@ -225,6 +293,57 @@ def validation_metrics(model, cfg, rows, device):
         out[f"val_auc/{task}"] = auc(
             [target(r, task) for r in known], [scores[r["sample_id"]] for r in known]
         )
+    # Biến thể nén: AUC validation từng mức; thước chọn checkpoint val_auc/<tác vụ> = trung bình
+    # bản sạch và các mức nén có đủ nhãn (model tốt ở cả hai, không chỉ ở video sạch).
+    labelled = variant_names(cfg, labelled=True)
+    if labelled:
+        from vn_av_df.training.evaluate import variant_rows
+
+        for name in labelled:
+            v_rows = variant_rows(cfg, rows, model.needs, name)
+            if not v_rows:
+                continue
+            v_pred = predict(model, cfg, v_rows, device, variant=name)
+            for task in list(scores_by_task):
+                scores = {s: task_scores(model, p).get(task) for s, p in v_pred.items()}
+                known = [r for r in v_rows if target(r, task) is not None]
+                value = auc(
+                    [target(r, task) for r in known], [scores[r["sample_id"]] for r in known]
+                )
+                out[f"val_auc_{name}/{task}"] = value
+        for task in list(scores_by_task):
+            values = [out[f"val_auc/{task}"]] + [
+                out[f"val_auc_{n}/{task}"] for n in labelled if f"val_auc_{n}/{task}" in out
+            ]
+            out[f"val_auc_clean/{task}"] = out[f"val_auc/{task}"]
+            if all(v is not None for v in values):
+                out[f"val_auc/{task}"] = float(np.mean(values))
+    # Biến thể PR (chỉ đo, không chọn checkpoint): AUC "khớp đường ống" trên validation = lip-sync bản
+    # sạch so với real / sham / voice đã qua xử lý lành tính (visual; AI? chỉ real + sham là âm).
+    specs = cfg.get("variant_specs") or {}
+    for name in [
+        n for n in cfg.get("variants") or {} if specs.get(n, {}).get("kind") == "processed_real"
+    ]:
+        from vn_av_df.training.evaluate import PIPELINE_NEGATIVE_CELLS, variant_rows
+
+        pr_rows = variant_rows(
+            cfg, [r for r in rows if r.get("cell") in ("real", "sham", "voice")], model.needs, name
+        )
+        if not pr_rows:
+            continue
+        pr_pred = predict(model, cfg, pr_rows, device, variant=name)
+        positives = [r["sample_id"] for r in rows if r.get("synthetic_visual")]
+        for task, cells in PIPELINE_NEGATIVE_CELLS.items():
+            if task not in scores_by_task:
+                continue
+            neg = [
+                task_scores(model, pr_pred[r["sample_id"]]).get(task)
+                for r in pr_rows
+                if r.get("cell") in cells
+            ]
+            pos = [scores_by_task[task][s] for s in positives]
+            if neg and pos and None not in neg:
+                out[f"val_pipeline_{name}/{task}"] = auc([1] * len(pos) + [0] * len(neg), pos + neg)
     ai = scores_by_task.get("ai")
     if ai:
         reals = [r for r in rows if r.get("cell") == "real"]
@@ -385,6 +504,9 @@ def train_one(cfg, name, seed, rows, out):
         tags=[name] + ([f"group:{group_tag}"] if group_tag else []),
         with_setup=True,
     )
+    run.step_axis(
+        "train/steps"
+    )  # đường học theo bước: điểm mỗi STEP_POINTS phần epoch + điểm cuối epoch
     run.tables(
         {
             "architecture/modules": (
@@ -432,7 +554,8 @@ def train_one(cfg, name, seed, rows, out):
     best, patience, stop, start = None, 0, "max_epochs", 1
     resume = out / "last.pt"
     if resume.is_file():
-        state = torch.load(resume, map_location=device, weights_only=False)
+        # Nạp về CPU: trạng thái RNG phải là ByteTensor trên CPU; model, optimizer tự về đúng thiết bị.
+        state = torch.load(resume, map_location="cpu", weights_only=False)
         speed = ("workers", "eval_batch_size")  # chỉ ảnh hưởng tốc độ, đổi được khi chạy tiếp
         same = {k: v for k, v in options.items() if k not in speed} == {
             k: v for k, v in state["options"].items() if k not in speed
@@ -483,6 +606,13 @@ def train_one(cfg, name, seed, rows, out):
             clip,
             scaler,
             label=f"{tag} train",
+            step_log={
+                "run": run,
+                "steps": sum(e["train_parts"].get("steps", 0) for e in history["epochs"]),
+                "samples": sum(e["train_parts"].get("samples", 0) for e in history["epochs"]),
+                "epoch": epoch,
+                "every": max(1, len(train_loader) // STEP_POINTS),
+            },
         )
         val_loss = run_epoch(
             model, val_loader, None, device, weights, val_stats, label=f"{tag} val"
@@ -517,7 +647,14 @@ def train_one(cfg, name, seed, rows, out):
                 "loss/train": train_loss,
                 "loss/val": val_loss,
                 "monitor": value,
-                **{f"loss_train/{k}": v for k, v in train_stats.items() if k != "grad_norm"},
+                # Cộng dồn qua mọi epoch đã ghi (kể cả phiên trước khi train tiếp từ last.pt).
+                "train/steps": sum(e["train_parts"].get("steps", 0) for e in history["epochs"]),
+                "train/samples": sum(e["train_parts"].get("samples", 0) for e in history["epochs"]),
+                **{
+                    f"loss_train/{k}": v
+                    for k, v in train_stats.items()
+                    if k not in ("grad_norm", "steps", "samples")
+                },
                 **{f"loss_val/{k}": v for k, v in val_stats.items() if k != "grad_norm"},
                 "grad_norm": train_stats.get("grad_norm"),
                 "lr": optimizer.param_groups[0]["lr"],
@@ -529,7 +666,6 @@ def train_one(cfg, name, seed, rows, out):
                     else {}
                 ),
             },
-            step=epoch,
         )
         improved = better(value, best, monitor[0])
         spent = time.monotonic() - began

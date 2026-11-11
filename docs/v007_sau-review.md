@@ -1,12 +1,17 @@
-# v006 · M6 "ViSyl" sau review
+# v007 · M7 "ViSyl" sau review
 
-> **Code (03/11/2026):** M6 = `visyl`, `visyl_no_phon`, `visyl_uniform_no_phon`, `visyl_shuffled_tags` (`training/models.py`), cache `syll` (`features/syllables.py`, bộ căn PhoWhisper DTW), pseudo-fake theo đơn vị (`data.replace_audio`), P4 / P6 (`evaluate.py`). Chưa có: hình học môi và kỳ vọng theo người (chờ 0c'), phép đảo thẻ lúc suy luận, cổng G1-G8 trong `report.py`. Cách train theo v004 của Linh (nhãn mismatch đo được, dịch tiếng −2…+5, chọn theo val AUC), không theo protocol v003 ghi trong file này (MN chốt 03/11). Chưa train, chưa đo trên dữ liệu thật; bản sao của file đề xuất trong project, giữ nguyên nội dung.
+> **Đổi tên và cập nhật 11/11/2026 (MN):** "ViSyl" nay là **v007 · M7** (v005 của Linh đã đóng với M3-R; đề xuất "M1 + P1–P6" nay là v006 · M6). Thiết kế dưới đây giữ nguyên; các điểm đổi theo kết quả v004 / v005 của Linh ([docs/v005_report.md](v005_report.md), bảng §0b của [docs/v006-v007_de-xuat-detector.md](v006-v007_de-xuat-detector.md)):
+> - **Mốc so sánh** của G1 và các cổng khác là M3-R v005 (AI? 0,973 / 0,962 / 0,914 ở sạch / 480p / 360p), không còn M1-v003.
+> - **Train theo v005:** thêm bản nén c480 / c360 (lấy ngẫu nhiên p = 0,5, không theo cặp); cache `syll` của bản nén chạy lại PhoWhisper trên tiếng đã nén; thêm sham làm mẫu âm của đầu visual (trọng số 1) và tắt ngẫu nhiên nhóm lớp XLS-R (0,4) như M3-R.
+> - **Rủi ro mới (○):** M7 chỉ dùng AV-HuBERT (không crop miệng), nên sẽ chịu đúng chỗ yếu của AV-HuBERT hình ở 360p (M3-R visual 0,992 → 0,932) và dưới 360p (cổng độ phân giải áp cho mọi model). Ngược lại, "sync một mình 0,954 so với trace một mình 0,924" (local ●) cho thấy tín hiệu chính là ngữ nghĩa môi–tiếng, là cái M7 dùng.
+>
+> **Code (11/11/2026):** M7 = `visyl`, `visyl_no_phon`, `visyl_uniform_no_phon`, `visyl_shuffled_tags` (`training/models.py`), cache `syll` (`features/syllables.py`, bộ căn PhoWhisper DTW), pseudo-fake theo đơn vị (`data.replace_audio`), P4 / P6 (`evaluate.py`). Chưa có: hình học môi và kỳ vọng theo người (chờ 0c'), phép đảo thẻ lúc suy luận, cổng G1-G8 trong `report.py`. Chưa train, chưa đo trên dữ liệu thật.
 
 Ngày 30/10/2026 · viết cho MN và team VN-AV-DF-Capstone
 
 > **Đổi tên 02/11/2026 (MN):** repo của Linh đã có v004 riêng (M3 = `trihead_v4`, môi–tiếng–đầu). Vì vậy đề xuất "M1 + P1–P6" (trước gọi là v004 · M1 (v004)) nay là **v005 · M5**, và "ViSyl" (trước gọi là v005 · M3) nay là **v006 · M6**. Tên file review (`review-v004`, `review-v005`) và Claude Doc "v004 · Đề xuất nâng cấp M1" giữ tên cũ.
 >
-> **Trạng thái.** Đề xuất: chưa có code, chưa train, chưa đo gì trên dữ liệu thật. File này **thay cho §3 (v006)** và mở rộng §4 của `plans/2026-10-30_v005-v006_de-xuat-detector.md` (bản trước review). Báo cáo review đầy đủ, có dẫn dòng code và URL cho từng phát hiện: `reviews/2026-10-30_review-v005.md`. Mọi số của v003 vẫn lấy từ slide của Linh (part 1, 1 seed), chưa đối chiếu được với output gốc.
+> **Trạng thái.** Đề xuất: chưa có code, chưa train, chưa đo gì trên dữ liệu thật. File này **thay cho §3 (v007)** và mở rộng §4 của `plans/2026-10-30_v006-v007_de-xuat-detector.md` (bản trước review). Báo cáo review đầy đủ, có dẫn dòng code và URL cho từng phát hiện: `reviews/2026-10-30_review-v005.md`. Mọi số của v003 vẫn lấy từ slide của Linh (part 1, 1 seed), chưa đối chiếu được với output gốc.
 >
 > **Mức tin:** ● số đo (slide hoặc dữ liệu nhóm) · ✔ đã kiểm trong code (commit `2b3a70c` trên `main`) hoặc nguồn gốc · ✔ (review) reviewer đã mở nguồn, mình chưa mở lại · ○ suy luận, ước lượng, chưa kiểm.
 
@@ -14,10 +19,10 @@ Ngày 30/10/2026 · viết cho MN và team VN-AV-DF-Capstone
 
 ## 0. Tóm tắt
 
-**v006 vẫn là M6 "ViSyl"**: một model mới, khác họ với M1, là đề xuất thứ hai cạnh M5 (v005) chứ không thay M1. Ý chính giữ nguyên: phân tích theo âm tiết tiếng Việt và kiểm xem môi có khép đúng ở những chỗ mà tiếng Việt bắt khép hay không.
+**v007 vẫn là M7 "ViSyl"**: một model mới, khác họ với M1, là đề xuất thứ hai cạnh M6 (v006) chứ không thay M1. Ý chính giữ nguyên: phân tích theo âm tiết tiếng Việt và kiểm xem môi có khép đúng ở những chỗ mà tiếng Việt bắt khép hay không.
 
 **Review kết luận: chưa nên train như bản 30/10, phải sửa nấc 0 trước.** Reviewer (một agent độc lập, vai senior reviewer / researcher) tìm 29 phát hiện: 2 chặn, 6 nặng, 12 vừa, 9 nhẹ. Hai lỗi chặn:
-1. Phép thử định vị của H-A thắng sẵn do cách dựng dữ liệu: hơn nửa số đoạn giả partial có AI có biên chính là mốc từ của PhoWhisper, cùng nguồn với đơn vị của M6.
+1. Phép thử định vị của H-A thắng sẵn do cách dựng dữ liệu: hơn nửa số đoạn giả partial có AI có biên chính là mốc từ của PhoWhisper, cùng nguồn với đơn vị của M7.
 2. Pilot khép môi 0c không tách được "generator không khép môi" khỏi "dlib đo lệch trên miệng mờ, nhỏ".
 
 Mình đã tự kiểm lại các claim có ảnh hưởng lớn nhất trong code và nguồn (§1.5), thấy đúng, và nhận cả 29 phát hiện. Ở ba chỗ (C1, N4, V10) mình sửa khác hoặc mạnh hơn đề xuất của reviewer, lý do ghi ở chỗ tương ứng.
@@ -34,11 +39,11 @@ Mình đã tự kiểm lại các claim có ảnh hưởng lớn nhất trong co
 | Đầu ra | 3 đầu đọc chung một biểu diễn | đầu audio có đường riêng chỉ đọc tiếng; đầu visual và mismatch đọc đường gộp không có XLS-R |
 | Pseudo-fake | bỏ | giữ như M1 (p = 0,25), làm theo đơn vị, một nửa số lần cắt đúng biên âm tiết |
 | Ablation | 2 × 2, 2 seed | 4 cấu hình (thêm thẻ xáo trộn) + đảo thẻ lúc suy luận, 5 seed, một tiêu chí chọn định trước |
-| Cổng | G1 biên −0,02; M6 dùng P4 còn M1 không | cùng hậu xử lý, điểm trung bình 3 seed, nói rõ lực kiểm định; thêm cổng cho đầu visual trên ②, ③ và đầu audio trên ④, ⑤ |
+| Cổng | G1 biên −0,02; M7 dùng P4 còn M1 không | cùng hậu xử lý, điểm trung bình 3 seed, nói rõ lực kiểm định; thêm cổng cho đầu visual trên ②, ③ và đầu audio trên ④, ⑤ |
 | Code | "train / evaluate / report dùng nguyên" | danh sách 10 việc code thật; module `syll` riêng để không làm cũ cache XLS-R, mouth, LIPINC, wave |
 | Claim tính mới | "độ mở môi có điều kiện theo kỳ vọng âm vị" | thu hẹp: luật phụ âm cuối môi-ngạc mềm của tiếng Việt suy từ chính tả, đo theo đơn vị âm tiết, có tính phương ngữ |
 
-**Đường đi tiếp.** Nấc 0 (gần như chỉ CPU, cộng khoảng 8–12 giờ công gán nhãn tay) quyết định tất cả: 0b' trượt thì bỏ H-A; 0c' trượt thì bỏ phần đo môi của H-B; cả hai trượt thì M6 chỉ còn là một baseline rẻ, không claim gì về âm tiết hay khép môi (hoặc team dừng v006). Chi phí GPU của v006 tăng từ ~15–25 lên ~20–60 giờ (○), vẫn dưới bước kết ~100–140 giờ của v005.
+**Đường đi tiếp.** Nấc 0 (gần như chỉ CPU, cộng khoảng 8–12 giờ công gán nhãn tay) quyết định tất cả: 0b' trượt thì bỏ H-A; 0c' trượt thì bỏ phần đo môi của H-B; cả hai trượt thì M7 chỉ còn là một baseline rẻ, không claim gì về âm tiết hay khép môi (hoặc team dừng v007). Chi phí GPU của v007 tăng từ ~15–25 lên ~20–60 giờ (○), vẫn dưới bước kết ~100–140 giờ của v006.
 
 ---
 
@@ -52,7 +57,7 @@ Reviewer đọc §3, §4 của bản 30/10 (đọc §0–§2, §5 làm bối c�
 - ③ track B lấy đoạn sửa từ mốc từ PhoWhisper trên tiếng gốc (`generate.py:255`, `:286-295`; span = [start của từ đầu, end của từ cuối], `voice/edit.py:100-105`). Track C (chỉ test) dùng đúng span đó. ⑥ dùng span này cho đoạn tiếng giả, và ở ⑥ partial cho cả **biên trộn hình** (`generate.py:435-447`). ②, ④, ⑤ partial dùng `random_span`, vị trí đều trên lưới frame ✔.
 - Tỉ lệ (○, suy từ `plan.py` và `generators_per_clip` = 2 / 2 / 3): khoảng 56 % (train, val) và 60 % (test) đoạn giả partial có AI là đoạn theo biên từ.
 - Smoke check của reviewer (3.000 clip tổng hợp, bộ chấm hoàn hảo, chỉ bị giới hạn bởi lưới đơn vị): trung bình P(IoU ≥ t), t = 0,5…0,95, là 1,000 với đơn vị âm tiết so với 0,907 với cửa sổ 0,2 s trên đoạn theo biên từ; trên đoạn ngẫu nhiên hai loại gần bằng nhau (0,905 so với 0,899).
-- Hệ quả: G5 và G2 ở bản 30/10 gần như chắc đạt mà không nói gì về chất lượng model, và luật giữ M6 ("G1 và G2 hoặc G3") có thể thoả vì lý do sai.
+- Hệ quả: G5 và G2 ở bản 30/10 gần như chắc đạt mà không nói gì về chất lượng model, và luật giữ M7 ("G1 và G2 hoặc G3") có thể thoả vì lý do sai.
 - Mình xử lý mạnh hơn đề xuất của review: tách H-A thành H-A1 (tính chất thiết kế, không làm cổng) và H-A2 (giả thuyết thật, kiểm trên tầng đoạn ngẫu nhiên). Lý do: với đoạn sửa theo biên từ, bộ tách âm tiết nào đủ chính xác cũng cho biên đúng, nên đó là điều kiểm được bằng độ chính xác bộ căn (0b'), không cần train.
 
 **C2 · Pilot 0c không tách được "không khép" khỏi "đo lệch".**
@@ -70,7 +75,7 @@ Reviewer đọc §3, §4 của bản 30/10 (đọc §0–§2, §5 làm bối c�
 | N3 | Miền Nam và miền Trung đọc un, ut, ôn, ôt thành [ŋ͡m], [k͡p̚] (đang gắn `other`); Bắc Trung Bộ đọc nhiều vần môi-ngạc mềm mà không khép; "v" miền Nam thường là [j]; dữ liệu không có nhãn vùng | ✔ Wikipedia "Vietnamese phonology"; `docs/v003_data.md:945` ✔ (review) | thẻ có tính phương ngữ, kỳ vọng khép theo người, 0f ghi vùng, đối chiếu từ điển MFA (§2.2) |
 | N4 | Đoạn sửa của ③B, ⑥, ③C lấy từ một bảng cố định (có ↔ không, số đếm, vài từ thay thế); track B co giãn **không giới hạn** (±15 % chỉ có ở track A); độ dài đơn vị đi thẳng vào model; ③C ở test dùng cùng bảng nên lối tắt làm điểm test đẹp lên chứ không lộ ra | ✔ `edit.py:10-50`, `audio.py:67-100`, `:255-264`, `generate.py:297-299`; arXiv 2603.11205 (model chỉ đọc transcript đạt WordF1 ~84 % trên AV-1M dev) ✔ (review) | probe ở 0d'; bỏ độ dài tường minh. Mình thêm một giới hạn mà review chưa nói: Transformer vẫn suy được độ dài từ vị trí các đơn vị kề nhau, nên chỉ sửa dữ liệu mới chặn tận gốc |
 | N5 | 2 × 2 gộp thẻ kỳ vọng với hình học môi đo tay; bản cửa sổ đều đo môi ở mép cửa sổ và có độ dài hằng số, nên tương tác có sẵn; G5 lẫn ba yếu tố | ○ suy từ đặc tả | H-A2 so hai bản không thẻ; bản cửa sổ đều không dùng ASR; thêm thẻ xáo trộn và đảo thẻ (§4.2) |
-| N6 | Với 10 người test (SE ≈ 0,0115 suy từ CI trên slide), G1 biên −0,02 chỉ đạt khoảng 41 % khi hai model ngang nhau; M6 dùng P4 còn M1-v003 dùng max thô; `report.py` tính cổng trên seed đầu | ✔ `report.py:131`, `:169`; `evaluate.py:129-141`; ○ tính lực | cùng hậu xử lý, trung bình 3 seed, ghi lực vào báo cáo, đề xuất biên −0,03 cho team chốt (§4.5) |
+| N6 | Với 10 người test (SE ≈ 0,0115 suy từ CI trên slide), G1 biên −0,02 chỉ đạt khoảng 41 % khi hai model ngang nhau; M7 dùng P4 còn M1-v003 dùng max thô; `report.py` tính cổng trên seed đầu | ✔ `report.py:131`, `:169`; `evaluate.py:129-141`; ○ tính lực | cùng hậu xử lý, trung bình 3 seed, ghi lực vào báo cáo, đề xuất biên −0,03 cho team chốt (§4.5) |
 
 ### 1.3. Lỗi vừa, lỗi nhẹ và cách xử lý
 
@@ -78,11 +83,11 @@ Reviewer đọc §3, §4 của bản 30/10 (đọc §0–§2, §5 làm bối c�
 |---|---|---|
 | V1 | "Train / evaluate / report dùng nguyên" sai: thiếu dịch đơn vị theo tiếng, nạp landmark, P4, P6, bootstrap AP, nhiều seed, lát G4; cache ASR của bước sinh khoá theo clip gốc, dùng lại sẽ rò lời gốc vào thẻ của ③B, ⑥ | §5 liệt kê việc code thật; cache khoá theo hash tiếng của chính mẫu |
 | V2 | Thêm `syll` vào `features/encoders.py` đổi `sha(__file__)` trong chữ ký cache XLS-R, mouth, LIPINC, wave, nên mọi cache đó bị trích lại | module riêng `features/syllables.py` |
-| V3 | 0d vòng tròn (ASR trên tiếng đã ghép), ±1 frame quá rộng với âm tiết 4–5 frame, lực thấp, đo M1 chứ không đo M6 | 0d' dùng ASR của tiếng gốc và tiếng donor, thêm probe, thêm tập phân tích ② theo biên từ (cần team đồng ý) |
+| V3 | 0d vòng tròn (ASR trên tiếng đã ghép), ±1 frame quá rộng với âm tiết 4–5 frame, lực thấp, đo M1 chứ không đo M7 | 0d' dùng ASR của tiếng gốc và tiếng donor, thêm probe, thêm tập phân tích ② theo biên từ (cần team đồng ý) |
 | V4 | 2 seed không ước được nhiễu seed; chọn trên val theo 4 tiêu chí chưa định trước | 5 seed, một tiêu chí chính định trước |
 | V5 | Tiền đề "generator học chủ yếu tiếng Anh (và tiếng Trung)" mâu thuẫn giữa §0 và §3.2 cũ; tiếng Trung chỉ được ghi cho LatentSync 1.5 (chỉ test); generator nhận tiếng, không đọc chính tả | §2.1 viết lại thành câu hỏi thực nghiệm, kèm bảng dữ liệu train của 6 generator và bằng chứng hai phía |
 | V6 | PIA bỏ **ảnh** môi trong ablation và đã dùng độ mở miệng theo âm vị; số AV-1M của WAFL là trên val, AP@0,5 chéo bộ của WAFL thấp hơn DiMoDif và AuViRe; thiếu He & Wang (PRCV 2025) và 4 nguồn khác | sửa trích dẫn, thu hẹp claim tính mới (§2.10) |
-| V7 | Bước kết part 1 + 2: code ghép part không đổi split; người test part 1 đã bị xem, có generator và giọng chỉ-test | §4.4 nêu hai cách, đề xuất một (quyết định chung với v005) |
+| V7 | Bước kết part 1 + 2: code ghép part không đổi split; người test part 1 đã bị xem, có generator và giọng chỉ-test | §4.4 nêu hai cách, đề xuất một (quyết định chung với v006) |
 | V8 | Bỏ pseudo-fake thêm một khác biệt với M1 | giữ pseudo-fake, làm theo đơn vị (§2.7) |
 | V9 | `v` của AV-HuBERT là bản tinh chỉnh đọc môi (VSR) nên đã mã hoá khép môi; `visyl_no_phon` vẫn học được kỳ vọng ngầm; G4 không xác nhận cũng không bác được H-B | thêm phép đảo thẻ, so theo đơn vị, probe tuyến tính trên `v` |
 | V10 | Đầu gộp: đầu audio thấy đặc trưng hình; ở ⑥ đoạn tiếng giả trùng đoạn môi giả, nên giải thích theo từng đầu không tin được | mạnh hơn đề xuất của review (review chỉ đề xuất báo cáo và cân nhắc chặn gradient): đầu audio có đường riêng chỉ đọc tiếng; đường gộp bỏ XLS-R, để đầu visual khó học "tiếng giống TTS ⇒ môi giả" từ ⑥ |
@@ -92,7 +97,7 @@ Reviewer đọc §3, §4 của bản 30/10 (đọc §0–§2, §5 làm bối c�
 | L2 | Bear & Harvey không đỡ câu "khép môi là lớp ổn định nhất" | bỏ câu đó |
 | L3 | Luật chính tả: oong, ooc; tách qu, gi trước khi tìm vần; chữ số | §2.2 |
 | L4 | Câu đoán danh tính tác giả bộ VLR; "crop cùng cách với v003" của ViCocktail chưa kiểm; 0e có thể đo sai mục tiêu | bỏ câu đoán; ghi ○; thêm probe real so với ④ vào 0e |
-| L5 | Ước tốc độ PhoWhisper lạc quan (fp32, gọi từng clip); M6 đọc XLS-R như M1 nên ước giờ train theo M2 là lạc quan | đo 50 clip và 1 epoch trước khi lập lịch |
+| L5 | Ước tốc độ PhoWhisper lạc quan (fp32, gọi từng clip); M7 đọc XLS-R như M1 nên ước giờ train theo M2 là lạc quan | đo 50 clip và 1 epoch trước khi lập lịch |
 | L6 | arXiv 2604.16808 bản v4 tên "BioLip", không thấy "LADDER" | sửa |
 | L7 | Tỉ lệ ASR thất bại có thể khác theo ô và thành dấu hiệu | báo theo ô (0d', G8) |
 | L8 | Số đo landmark trên demo dễ được đọc như bằng chứng khi phép đo chưa được kiểm | chỉ hiện sau khi 0c' đạt (§2.6) |
@@ -120,13 +125,13 @@ Trước khi sửa, mình kiểm lại các claim có ảnh hưởng lớn nhấ
 
 ---
 
-## 2. Thiết kế M6 (v006) sau review
+## 2. Thiết kế M7 (v007) sau review
 
 ### 2.1. Câu hỏi và giả thuyết
 
 **Câu hỏi nghiên cứu.** Đưa kiến thức tiếng Việt (âm tiết; luật khép môi suy từ chính tả, có tính phương ngữ) vào detector có giúp ở những chỗ M1 yếu không: đoạn giả ngắn, generator chưa thấy, và giải thích được kết quả.
 
-- **H-A1 · tính chất thiết kế, không phải giả thuyết về model.** Khi đoạn bị sửa theo biên từ (kiểu sửa lời ngoài đời, và kiểu ③B, ③C, ⑥ trong dữ liệu), một lưới âm tiết chính xác cho biên đoạn trùng biên sửa. Điều này đúng do cấu trúc (C1), nên chỉ kiểm độ chính xác của bộ căn (0b') và báo kết quả định vị trên tầng theo biên từ riêng, ghi rõ "biên đoạn giả = mốc ASR". Không dùng để giữ M6.
+- **H-A1 · tính chất thiết kế, không phải giả thuyết về model.** Khi đoạn bị sửa theo biên từ (kiểu sửa lời ngoài đời, và kiểu ③B, ③C, ⑥ trong dữ liệu), một lưới âm tiết chính xác cho biên đoạn trùng biên sửa. Điều này đúng do cấu trúc (C1), nên chỉ kiểm độ chính xác của bộ căn (0b') và báo kết quả định vị trên tầng theo biên từ riêng, ghi rõ "biên đoạn giả = mốc ASR". Không dùng để giữ M7.
 - **H-A2 · giả thuyết.** Gộp đặc trưng theo âm tiết cho điểm ít loãng hơn gộp theo cửa sổ đều với đoạn giả ngắn (0,3–0,6 s, khoảng 1–3 âm tiết), kể cả khi biên đoạn không trùng biên âm tiết. Kiểm trên tầng đoạn ngẫu nhiên (②, ④, ⑤ partial) bằng cặp `visyl_no_phon` so với `visyl_uniform_no_phon` (G5). WAFL (định vị neo theo từ) là công trình gần nhất, nhưng số tốt của WAFL đến từ dữ liệu sửa theo từ (V6), nên chưa có bằng chứng trực tiếp cho H-A2.
 - **H-B · giả thuyết.** Ở các âm tiết mà tiếng Việt bắt khép môi, nhất là phụ âm cuối môi-ngạc mềm [ŋ͡m], [k͡p̚] (không có trong tiếng Anh, cũng không có trong tiếng Trung phổ thông), môi do generator vẽ khép kém hơn môi thật của cùng câu. Đây là **câu hỏi thực nghiệm**: generator nhận tiếng chứ không đọc chính tả, nên câu hỏi đúng là đặc trưng âm thanh của [ŋ͡m], [k͡p̚] có kéo generator về hình miệng khép hay không. Âm môi chung với tiếng Anh (m, b, p) có thể đã được generator vẽ đúng (tiền đề của NPVForensics), nên phần riêng của tiếng Việt mới là chỗ H-B còn hy vọng. Kiểm bằng 0c' (trước khi train) và G4 (sau khi train).
 
@@ -205,19 +210,19 @@ Về độ dài: bỏ đặc trưng độ dài tường minh, nhưng Transformer
 
 ### 2.6. Đầu ra, gộp, định vị, giải thích
 
-- Điểm mỗi đơn vị được gán cho mọi frame của đơn vị đó, nên M6 giữ giao diện `Model` (logit theo frame [B, T] cho từng đầu) và loss mặc định (BCE theo frame + BCE theo video, `pos_weights` như v003).
+- Điểm mỗi đơn vị được gán cho mọi frame của đơn vị đó, nên M7 giữ giao diện `Model` (logit theo frame [B, T] cho từng đầu) và loss mặc định (BCE theo frame + BCE theo video, `pos_weights` như v003).
 - Gộp video: top-5 frame như M1.
-- AI? = max(z_visual, z_audio) với z theo real val và chuẩn hoá theo 3 clip tham chiếu (P4 của v005). Khi so với M1-v003, cả hai dùng **cùng hậu xử lý** (N6).
-- Định vị: thước đo P6 của v005, báo theo **tầng**: tầng đoạn ngẫu nhiên (②, ④, ⑤ partial) là tầng chính; tầng theo biên từ (③B, ③C, ⑥) báo riêng với ghi chú "biên = mốc ASR"; thêm sai số biên (ms), AP@0,5 và lát đoạn ≤ 0,6 s.
+- AI? = max(z_visual, z_audio) với z theo real val và chuẩn hoá theo 3 clip tham chiếu (P4 của v006). Khi so với M1-v003, cả hai dùng **cùng hậu xử lý** (N6).
+- Định vị: thước đo P6 của v006, báo theo **tầng**: tầng đoạn ngẫu nhiên (②, ④, ⑤ partial) là tầng chính; tầng theo biên từ (③B, ③C, ⑥) báo riêng với ghi chú "biên = mốc ASR"; thêm sai số biên (ms), AP@0,5 và lát đoạn ≤ 0,6 s.
 - Giải thích trên demo (Gradio): chỉ bật sau khi 0c' xác nhận phép đo. Hiện điểm visual và mismatch cạnh nhau, vì một âm tiết lệch tiếng–hình có thể là ② sham chứ không phải môi giả. Không hiện số đo môi khi miệng nhỏ hơn một ngưỡng pixel (đặt theo 0c'). Ghi rõ đó là số đo landmark, không phải trọng số model.
 
 ### 2.7. Huấn luyện
 
-- **Pseudo-fake theo đơn vị, p = 0,25 như M1 (V8).** Thay đoạn [s, e) dài 0,3–3 s của `a`, `ssl`, `wave` bằng đoạn cùng vị trí của một clip real khác cùng người (như `replace_audio`), và **thay luôn các đơn vị và thẻ** của đoạn đó bằng của clip nguồn (cắt ở hai mép). Một nửa số lần đặt s, e đúng biên âm tiết của clip nguồn. Nhãn: mismatch = 1, AI = 0. Cách này giữ M6 ngang M1 về cách train, dạy đầu visual rằng "kỳ vọng bị vi phạm" chưa chắc là môi giả, và đưa "ghép theo biên từ nhưng không có AI" vào train để chống lối tắt ở §3 mà không phải sinh lại dữ liệu.
+- **Pseudo-fake theo đơn vị, p = 0,25 như M1 (V8).** Thay đoạn [s, e) dài 0,3–3 s của `a`, `ssl`, `wave` bằng đoạn cùng vị trí của một clip real khác cùng người (như `replace_audio`), và **thay luôn các đơn vị và thẻ** của đoạn đó bằng của clip nguồn (cắt ở hai mép). Một nửa số lần đặt s, e đúng biên âm tiết của clip nguồn. Nhãn: mismatch = 1, AI = 0. Cách này giữ M7 ngang M1 về cách train, dạy đầu visual rằng "kỳ vọng bị vi phạm" chưa chắc là môi giả, và đưa "ghép theo biên từ nhưng không có AI" vào train để chống lối tắt ở §3 mà không phải sinh lại dữ liệu.
 - Augment dịch tiếng −1…+2 frame, mốc đơn vị dịch theo (§2.3).
 - Train trên cả clip (`crop_frames = None`, clip ≤ 175 frame) vì đơn vị cần trọn âm tiết và ngữ cảnh câu.
 - Cân theo người; AdamW lr 3e-4, weight decay 1e-4, batch 16, tối đa 30 epoch, patience 5; chọn checkpoint theo val loss. Giống M1 để so công bằng (dừng sớm theo tổng val loss 3 đầu là việc mở #14 của v003, áp chung cho mọi model).
-- Không dùng loss gây nhầm lẫn người nói (M6 không có nhánh trace; W3 cho thấy cơ chế người của M1 chưa chứng minh được đóng góp).
+- Không dùng loss gây nhầm lẫn người nói (M7 không có nhánh trace; W3 cho thấy cơ chế người của M1 chưa chứng minh được đóng góp).
 
 ### 2.8. Sơ đồ
 
@@ -238,9 +243,9 @@ cache 25 Hz ──────────────────────�
 AI? = max(z_visual, z_audio) (P4) · định vị = dãy đơn vị vượt ngưỡng (P6, báo theo tầng)
 ```
 
-### 2.9. M6 sau review so với M5 (v005)
+### 2.9. M7 sau review so với M6 (v006)
 
-| Thành phần | M5 (v005) | M6 (v006) sau review |
+| Thành phần | M6 (v006) | M7 (v007) sau review |
 |---|---|---|
 | Đơn vị | frame 40 ms, TCN | âm tiết (bộ căn chọn ở 0b') + khoảng lặng, Transformer trên cả câu |
 | Sync | cost volume ±15 có chiếu học được + CNN 2D | hồ sơ cosine ±15 không tham số, gộp theo đơn vị |
@@ -256,7 +261,7 @@ AI? = max(z_visual, z_audio) (P4) · định vị = dãy đơn vị vượt ngư
 
 ### 2.10. Phần mới, sau khi thu hẹp
 
-| Khối | Đã có | Phần của v006 |
+| Khối | Đã có | Phần của v007 |
 |---|---|---|
 | Âm vị ↔ khẩu hình | Agarwal et al. 2020 (M, B, P; tiếng Anh; người sửa transcript rồi căn bằng P2FA); PIA (ICCVW 2025: luồng ảnh môi theo âm vị, và độ mở miệng MAR theo âm vị cho /m/, /b/, /p/ và nguyên âm tròn; tiếng Anh); NPVForensics (2023) | luật phụ âm cuối môi-ngạc mềm [ŋ͡m], [k͡p̚] của tiếng Việt suy từ chính tả, có tính phương ngữ, đo theo đơn vị âm tiết với kỳ vọng theo người |
 | Neo theo từ hoặc âm vị | WAFL (03/2026: sửa theo từ, mốc từ Google Speech-to-Text); He & Wang, PRCV 2025 (nhất quán ngữ nghĩa mức từ giữa đọc môi và ASR, cộng căn chỉnh mức âm vị, chỉ train trên real) | âm tiết tiếng Việt + khoảng lặng, kèm ② sham và 3 đầu ra |
@@ -268,7 +273,7 @@ Hai nguồn reviewer tìm thấy nhưng không mở được ("Lip Forgery Video
 
 ---
 
-## 3. Lối tắt trong dữ liệu v003 (thay §4 cũ; ảnh hưởng cả v003, v005, v006)
+## 3. Lối tắt trong dữ liệu v003 (thay §4 cũ; ảnh hưởng cả v003, v006, v007)
 
 Cách mỗi ô chọn đoạn và ghép (`src/vn_av_df/generation/generate.py:236-237`, `:286-301`, `:323-357`, `:430-447`; `voice/edit.py:10-50`, `:88-115`; `voice/audio.py:67-100`, `:230-264`) ✔:
 
@@ -283,14 +288,14 @@ Cách mỗi ô chọn đoạn và ghép (`src/vn_av_df/generation/generate.py:23
 | ⑥ both | span của track B | tiếng của track B (cả bản full lẫn partial đều có đoạn tiếng AI theo biên từ) | full: môi cả clip; partial: **biên trộn hình theo biên từ** |
 
 **Hệ quả** (○, chưa đo):
-1. "Ghép đúng biên từ" đi cùng nhãn "giọng AI" (③B, ③C, ⑥), và ở ⑥ partial đi cùng cả nhãn "môi giả"; "ghép giữa âm tiết" đi cùng ② (lệch, không AI) và ⑤ (môi giả, tiếng thật). Model nào thấy được vị trí vết ghép so với biên âm tiết (M1 qua XLS-R, M6 qua đơn vị âm tiết) có thể học lối tắt này. Ngoài đời người sửa lời thường cắt đúng biên từ, nên lối tắt làm model dễ báo nhầm các đoạn ghép tiếng thật nhưng cắt khéo.
+1. "Ghép đúng biên từ" đi cùng nhãn "giọng AI" (③B, ③C, ⑥), và ở ⑥ partial đi cùng cả nhãn "môi giả"; "ghép giữa âm tiết" đi cùng ② (lệch, không AI) và ⑤ (môi giả, tiếng thật). Model nào thấy được vị trí vết ghép so với biên âm tiết (M1 qua XLS-R, M7 qua đơn vị âm tiết) có thể học lối tắt này. Ngoài đời người sửa lời thường cắt đúng biên từ, nên lối tắt làm model dễ báo nhầm các đoạn ghép tiếng thật nhưng cắt khéo.
 2. Bảng sửa cố định (có ↔ không, số đếm, vài từ thay thế) tạo lối tắt từ vựng. Nhiều từ trong bảng mang thẻ khép môi ("không", "hôm", "năm", "tám", "trăm"; "một", "bốn" với người miền Nam), nên lối tắt này lẫn vào chính tín hiệu của H-B.
 3. Co giãn không giới hạn ở track B làm tốc độ âm tiết trong đoạn lệch khỏi tốc độ nói của người đó.
 4. Độ dài đoạn phân bố khác nhau theo ô (đều theo frame ở `random_span`, theo cụm từ ở `choose_edit`).
 5. ③C nối 5 ms và không khớp độ to, khác train: lát "giọng chưa thấy" lẫn cả "kiểu vết ghép chưa thấy".
 6. Vì ③C ở test dùng cùng bảng và cùng cách chọn đoạn, các lối tắt trên **làm điểm test cao lên** chứ không làm lộ ra; chúng còn cho mọi model neo theo âm tiết một lợi thế định vị có sẵn (C1).
 
-**Kiểm** ở 0d' (chỉ val, §4.1). **Sửa tận gốc** chỉ có ở dữ liệu (bảng sửa rộng hơn, giới hạn co giãn, bảng riêng cho test): việc của team cho phiên bản dữ liệu sau, không làm trong v006.
+**Kiểm** ở 0d' (chỉ val, §4.1). **Sửa tận gốc** chỉ có ở dữ liệu (bảng sửa rộng hơn, giới hạn co giãn, bảng riêng cho test): việc của team cho phiên bản dữ liệu sau, không làm trong v007.
 
 ---
 
@@ -301,7 +306,7 @@ Cách mỗi ô chọn đoạn và ghép (`src/vn_av_df/generation/generate.py:23
 | Bước | Nội dung | Đạt khi | Không đạt thì |
 |---|---|---|---|
 | 0a | Cache âm tiết cho 5.286 mẫu train + val part 1 (train 4.234, val 1.052); đo tốc độ trên 50 clip trước | có cache và số đo tốc độ | |
-| 0b' | Gán tay (Praat) 200–300 biên âm tiết trên 20–30 clip real thuộc train / val, nhiều người, cả nam và nữ, cả hai miền nếu có; so PhoWhisper DTW, CTC wav2vec2 tiếng Việt, MFA; phép thử biên ghép của ③B giữ làm kiểm tra phụ | một bộ căn có trung vị sai số ≤ 1 frame và P90 ≤ 2 frame ở **cuối âm tiết** (báo riêng cuối âm tiết đứng trước khoảng lặng) | bỏ H-A1, H-A2 và hình học môi đo ở cuối âm tiết; M6 chỉ còn là baseline rẻ, hoặc dừng |
+| 0b' | Gán tay (Praat) 200–300 biên âm tiết trên 20–30 clip real thuộc train / val, nhiều người, cả nam và nữ, cả hai miền nếu có; so PhoWhisper DTW, CTC wav2vec2 tiếng Việt, MFA; phép thử biên ghép của ③B giữ làm kiểm tra phụ | một bộ căn có trung vị sai số ≤ 1 frame và P90 ≤ 2 frame ở **cuối âm tiết** (báo riêng cuối âm tiết đứng trước khoảng lặng) | bỏ H-A1, H-A2 và hình học môi đo ở cuối âm tiết; M7 chỉ còn là baseline rẻ, hoặc dừng |
 | 0c' | Pilot khép môi có đối chứng (chi tiết dưới bảng) | `labial_velar` **tự** đạt trên chênh "fake − real đã suy biến" ở ≥ 2 / 4 generator train, cận dưới CI theo người > 0; phép đo được nhãn người xác nhận ở tầng miệng lớn (đề xuất: độ chính xác ≥ 0,8, kappa giữa hai người gán ≥ 0,6) | bỏ hình học môi đo tay và kỳ vọng theo người; H-B chỉ còn thẻ (kiểm bằng G4); bỏ claim "riêng tiếng Việt" |
 | 0d' | Probe lối tắt và kiểm §3 (chi tiết dưới bảng) | biết lối tắt nào có mặt và đã quyết cách chặn trước khi train | |
 | 0e | Encoder AV-HuBERT tiếng Việt (ViCocktail), **chỉ khi có giấy phép**: probe tuyến tính real so với ④ trên val, kèm điểm sync không train | probe hơn encoder hiện tại ≥ +0,02 | bỏ nấc 2 |
@@ -331,46 +336,46 @@ Nếu thấy lối tắt: chặn bằng cách bỏ đặc trưng tương ứng h
 
 | Cấu hình | Kiểm gì | Seed |
 |---|---|---|
-| `visyl` (M6 đầy đủ) | mô hình chính | 5 |
+| `visyl` (M7 đầy đủ) | mô hình chính | 5 |
 | `visyl_no_phon` (bỏ thẻ khẩu hình, hình học môi, kỳ vọng theo người) | so với `visyl`: H-B tổng thể | 5 |
 | `visyl_uniform_no_phon` (cửa sổ đều 0,2 s phủ cả clip, không dùng ASR) | so với `visyl_no_phon`: H-A2 | 5 |
 | `visyl_shuffled_tags` (thẻ xáo trộn trong cùng clip, giữ phân bố thẻ) | thẻ có mang thông tin của đúng âm tiết hay không | 5 |
 | `visyl`, đảo `labial_velar` → `other` lúc suy luận | phần riêng của tiếng Việt; không train thêm | dùng 5 seed của `visyl` |
 | (nếu còn quota) `visyl_tags_only`, `visyl_geom_only` | tách thẻ khỏi hình học môi | 3 |
 
-- 20 lần train chính. Đo 1 epoch trước khi lập lịch: M6 đọc XLS-R như M1, nên ước theo M2 (0,25 giờ, không đọc XLS-R) là lạc quan. Ước 0,5–1,5 giờ T4 mỗi lần, tổng ~10–30 giờ (○).
+- 20 lần train chính. Đo 1 epoch trước khi lập lịch: M7 đọc XLS-R như M1, nên ước theo M2 (0,25 giờ, không đọc XLS-R) là lạc quan. Ước 0,5–1,5 giờ T4 mỗi lần, tổng ~10–30 giờ (○).
 - Tiêu chí chính định trước: AI? trên val với P4, trung bình 5 seed. Tiêu chí phụ theo thứ tự: định vị P6 trên tầng đoạn ngẫu nhiên, sham, 3 tác vụ. Mục đích của bước chọn: quyết cấu hình nào vào bước kết và claim nào còn đáng kiểm trên test.
 - So với M1-v003 trên val chỉ để định hướng (M1-v003 chỉ có 1 seed).
 
 ### 4.3. Nấc 2 (có điều kiện)
 
-0e đạt và có giấy phép: trích lại `av` part 1 bằng encoder tiếng Việt, train lại `visyl` (5 seed). Nếu encoder giúp M6 thì cũng thử trên M5 (v005), để không nhầm "encoder tốt hơn" với "M6 tốt hơn".
+0e đạt và có giấy phép: trích lại `av` part 1 bằng encoder tiếng Việt, train lại `visyl` (5 seed). Nếu encoder giúp M7 thì cũng thử trên M6 (v006), để không nhầm "encoder tốt hơn" với "M7 tốt hơn".
 
-### 4.4. Bước kết (chung với v005)
+### 4.4. Bước kết (chung với v006)
 
-- part 1 + 2, 3 seed, test part 2 mở một lần; `visyl`, `visyl_no_phon`, `visyl_uniform_no_phon` chạy cùng đợt với M1-v003, M5 (v005), M2 và baseline (`visyl_shuffled_tags` chỉ dùng ở nấc 1).
-- **Người test của part 1** (V7; quyết định chung với v005). Code ghép các part mà không đổi split (`dataset.py:205`), nên phải chọn trước: (a) bỏ hẳn họ khỏi bước kết; hoặc (b) chuyển họ sang train nhưng loại mọi mẫu dùng generator hoặc giọng chỉ-test (LatentSync, Diff2Lip, VoxCPM2, viXTTS, F5 inpainting). Đề xuất (b): thêm 10 người cho train mà không làm hỏng lát "chưa thấy". Cách nào cũng là một phiên bản dữ liệu mới, cần code lọc và ghi provenance, không ghi đè `vn-av-df-data-part1`.
+- part 1 + 2, 3 seed, test part 2 mở một lần; `visyl`, `visyl_no_phon`, `visyl_uniform_no_phon` chạy cùng đợt với M1-v003, M6 (v006), M2 và baseline (`visyl_shuffled_tags` chỉ dùng ở nấc 1).
+- **Người test của part 1** (V7; quyết định chung với v006). Code ghép các part mà không đổi split (`dataset.py:205`), nên phải chọn trước: (a) bỏ hẳn họ khỏi bước kết; hoặc (b) chuyển họ sang train nhưng loại mọi mẫu dùng generator hoặc giọng chỉ-test (LatentSync, Diff2Lip, VoxCPM2, viXTTS, F5 inpainting). Đề xuất (b): thêm 10 người cho train mà không làm hỏng lát "chưa thấy". Cách nào cũng là một phiên bản dữ liệu mới, cần code lọc và ghi provenance, không ghi đè `vn-av-df-data-part1`.
 
 ### 4.5. Cổng (định trước; team chốt trước khi mở test part 2)
 
-Tất cả trên test part 2. Lấy trung bình điểm 3 seed cho từng mẫu rồi bootstrap theo người (10 người), kèm Δ của từng người. M1-v003 và M6 dùng cùng hậu xử lý (P4 là bản chính, báo thêm bản thô).
+Tất cả trên test part 2. Lấy trung bình điểm 3 seed cho từng mẫu rồi bootstrap theo người (10 người), kèm Δ của từng người. M1-v003 và M7 dùng cùng hậu xử lý (P4 là bản chính, báo thêm bản thô).
 
 | Cổng | So sánh · tập | Đạt khi |
 |---|---|---|
-| **G1 (chính)** | M6 − M1-v003 · AI? · toàn bộ test | cận dưới CI 95 % ≥ −0,03 (đề xuất; xem lực bên dưới) |
-| G2 (H-A2, định vị) | M6 − M1-v003 · P6 trên tầng đoạn ngẫu nhiên (②, ④, ⑤ partial + real) | cận dưới CI > 0 (bootstrap AP theo người) |
-| G3 | M6 − M1-v003 · tác vụ visual · LatentSync, Diff2Lip | Δ ≥ +0,02 và cận dưới CI > 0 |
+| **G1 (chính)** | M7 − M1-v003 · AI? · toàn bộ test | cận dưới CI 95 % ≥ −0,03 (đề xuất; xem lực bên dưới) |
+| G2 (H-A2, định vị) | M7 − M1-v003 · P6 trên tầng đoạn ngẫu nhiên (②, ④, ⑤ partial + real) | cận dưới CI > 0 (bootstrap AP theo người) |
+| G3 | M7 − M1-v003 · tác vụ visual · LatentSync, Diff2Lip | Δ ≥ +0,02 và cận dưới CI > 0 |
 | G4 (H-B) | tương tác: (`visyl` − `visyl_no_phon`) ở partial có âm tiết `labial_velar` trong đoạn giả, trừ cùng hiệu ở partial không có, trong cùng dải độ dài đoạn; kèm phép đảo thẻ | cận dưới CI > 0; đảo thẻ làm điểm visual của các âm tiết đó giảm ở ④ (chiều định trước) và gần như không đổi ở ① |
 | G5 (H-A2) | `visyl_no_phon` − `visyl_uniform_no_phon` · P6 trên tầng đoạn ngẫu nhiên, lát đoạn ≤ 0,6 s | cận dưới CI > 0 |
-| G6 | M6 · AI? sham so với real, tách full, partial, partial ≤ 0,6 s | ≤ AUC của M1-v003 + 0,03 và ≤ 0,60 |
-| G6b | M6 · đầu visual: ① so với ② partial; ① so với ③ | ≤ đầu visual của M1-v003 + 0,03 |
-| G6c | M6 · đầu audio: ① so với ④, ⑤ (tiếng thật, môi giả) | AUC ≤ 0,60 |
+| G6 | M7 · AI? sham so với real, tách full, partial, partial ≤ 0,6 s | ≤ AUC của M1-v003 + 0,03 và ≤ 0,60 |
+| G6b | M7 · đầu visual: ① so với ② partial; ① so với ③ | ≤ đầu visual của M1-v003 + 0,03 |
+| G6c | M7 · đầu audio: ① so với ④, ⑤ (tiếng thật, môi giả) | AUC ≤ 0,60 |
 | G7 | FPR ở ngưỡng 5 % chọn trên val | ≤ FPR của M1-v003 + 2 điểm %; báo kèm FPR của người cao nhất |
 | G8 (chỉ báo cáo) | tầng theo biên từ (③B, ③C, ⑥); tỉ lệ dự phòng ASR theo ô; kết quả theo nhóm vùng | báo |
 
-**Luật giữ.** M6 được giữ làm đề xuất nếu G1 đạt và (G2 hoặc G3) đạt. Claim H-A2 chỉ khi G5 đạt. Claim H-B chỉ khi 0c' và G4 đạt. Claim "riêng tiếng Việt" chỉ khi phần `labial_velar` tự đạt ở 0c' và ở phép đảo thẻ. Các biên 0,03 và 2 điểm % là đề xuất (của reviewer và của mình) để team chốt; điều quan trọng là có biên trước khi mở test.
+**Luật giữ.** M7 được giữ làm đề xuất nếu G1 đạt và (G2 hoặc G3) đạt. Claim H-A2 chỉ khi G5 đạt. Claim H-B chỉ khi 0c' và G4 đạt. Claim "riêng tiếng Việt" chỉ khi phần `labial_velar` tự đạt ở 0c' và ở phép đảo thẻ. Các biên 0,03 và 2 điểm % là đề xuất (của reviewer và của mình) để team chốt; điều quan trọng là có biên trước khi mở test.
 
-**Lực kiểm định (○, phải ghi vào báo cáo).** CI của M1 − BL-M/sup trên slide là [0,080; 0,125], tức SE khoảng 0,0115 với 10 người. Nếu Δ của M6 − M1-v003 có độ rộng tương tự:
+**Lực kiểm định (○, phải ghi vào báo cáo).** CI của M1 − BL-M/sup trên slide là [0,080; 0,125], tức SE khoảng 0,0115 với 10 người. Nếu Δ của M7 − M1-v003 có độ rộng tương tự:
 
 | Δ thật | P(G1 đạt), biên −0,02 | P(G1 đạt), biên −0,03 |
 |---|---|---|
@@ -378,7 +383,7 @@ Tất cả trên test part 2. Lấy trung bình điểm 3 seed cho từng mẫu 
 | 0 | 0,41 | 0,74 |
 | +0,01 | 0,74 | 0,94 |
 
-Với biên −0,02, G1 gần như là phép thử "M6 không thua về điểm". Các cổng "cận dưới CI > 0" cần hiệu ứng thật cỡ ≥ 0,03 AUC mới có lực ~0,8. Hai model giống nhau thường có Δ tương quan theo người nên SE thật có thể nhỏ hơn, nhưng chưa đo được.
+Với biên −0,02, G1 gần như là phép thử "M7 không thua về điểm". Các cổng "cận dưới CI > 0" cần hiệu ứng thật cỡ ≥ 0,03 AUC mới có lực ~0,8. Hai model giống nhau thường có Δ tương quan theo người nên SE thật có thể nhỏ hơn, nhưng chưa đo được.
 
 ---
 
@@ -391,7 +396,7 @@ Nguyên tắc: chỉ thêm, không sửa tại chỗ `TriHeadV2`, `proposals()` 
 3. `data.py`: need mới đọc `syll` và `landmarks` (khoá trong cache avhubert); dịch mốc đơn vị cùng `lag_audio`; pseudo-fake theo đơn vị.
 4. `models.py`: lớp `ViSyl` và các cấu hình ở §4.2, đăng ký trong `SPECS` (`crop_frames = None`, `pseudo_fake = 0.25`).
 5. Hình học môi theo đơn vị và kỳ vọng theo người, tính sau khi dịch tiếng; τ và chuẩn hoá theo clip tham chiếu.
-6. P4 (đã có trong kế hoạch v005) và P6 theo tầng (đoạn ngẫu nhiên, đoạn theo biên từ, ≤ 0,6 s); sai số biên theo ms.
+6. P4 (đã có trong kế hoạch v006) và P6 theo tầng (đoạn ngẫu nhiên, đoạn theo biên từ, ≤ 0,6 s); sai số biên theo ms.
 7. `report.py`: lấy trung bình điểm theo seed trước khi bootstrap (hiện chỉ dùng seed đầu); bootstrap theo người cho AP; cổng G1–G8 với biên định trước.
 8. Lát đánh giá đọc `syll` (G4, G8) và phép đảo thẻ lúc suy luận.
 9. Kiểm hồi quy: evaluate chỉ ghi hash checkpoint, không kiểm hash code, nên sau khi sửa `data.py` hay `evaluate.py` phải chạy lại M1-v003 trên val và thấy điểm giống hệt trước khi sửa.
@@ -413,7 +418,7 @@ Nguyên tắc: chỉ thêm, không sửa tại chỗ `TriHeadV2`, `proposals()` 
 | Nấc 1 (20 lần train) | ~10–30 giờ T4 |
 | Cache phần còn lại (test part 1, part 2) | ~1–2 giờ GPU |
 | Bước kết (3 cấu hình × 3 seed trên part 1 + 2) | ~9–27 giờ T4 |
-| **Tổng v006** | **~20–60 giờ GPU + ~8–12 giờ công gán nhãn** (bước kết của v005: ~100–140 giờ GPU) |
+| **Tổng v007** | **~20–60 giờ GPU + ~8–12 giờ công gán nhãn** (bước kết của v006: ~100–140 giờ GPU) |
 
 Giấy phép:
 - PhoWhisper-small: BSD-3-Clause ✔.
@@ -421,14 +426,14 @@ Giấy phép:
 - MFA tiếng Việt (mô hình âm học và từ điển Hà Nội, TP.HCM): CC BY 4.0 ✔ (review).
 - vPhon: GPL-3.0, chỉ đối chiếu ngoài repo.
 - ViCocktail (model `nguyenvulebinh/AV-HuBERT-CTC-Attention-VI`): không ghi giấy phép ở repo, model card và dataset card ✔; phải hỏi tác giả trước khi dùng. Paper ghi crop 96 × 96 từ landmark dlib 48–67; v003 căn theo mean face rồi cắt 88 từ ROI 96, nên "cùng cách crop với v003" chưa kiểm (○).
-- Bộ VLR (Zenodo 19705466): CC BY 4.0 ✔, nhưng nguồn là video YouTube; giấy phép của bộ dữ liệu không tự cho phép mọi cách dùng nội dung gốc (CLAUDE.md, Data Rules). v006 không cần bộ này.
+- Bộ VLR (Zenodo 19705466): CC BY 4.0 ✔, nhưng nguồn là video YouTube; giấy phép của bộ dữ liệu không tự cho phép mọi cách dùng nội dung gốc (CLAUDE.md, Data Rules). v007 không cần bộ này.
 
 ---
 
 ## 7. Giới hạn còn lại sau khi sửa
 
 1. **10 người test.** Hiệu ứng nhỏ hơn ~0,03 AUC sẽ không kết luận được, kể cả khi có thật.
-2. **H-B có thể sai.** Generator có thể khép môi đủ tốt ở [ŋ͡m], [k͡p̚]; khi đó v006 chỉ còn H-A2.
+2. **H-B có thể sai.** Generator có thể khép môi đủ tốt ở [ŋ͡m], [k͡p̚]; khi đó v007 chỉ còn H-A2.
 3. **Phép đo ở 25 Hz.** Phụ âm tắc cuối [p̚], [k͡p̚] có thể chỉ kéo dài 1–2 frame, và mức khép thật của [ŋ͡m], [k͡p̚] (khép hẳn hay khép một phần) chưa được kiểm trong tài liệu ngữ âm. Đối chứng ở 0c' cho biết phép đo có đáng tin không, nhưng không làm nó nhạy hơn.
 4. **Phương ngữ.** Nhãn vùng ước bằng tai; khác biệt ngay trong một vùng ("many speakers") chỉ được bù bằng kỳ vọng theo người, vốn dựa trên 3 clip tham chiếu.
 5. **Lối tắt trong dữ liệu.** Lối tắt từ vựng, độ dài và vị trí vết ghép không loại hẳn được bằng kiến trúc; chỉ dữ liệu mới sửa tận gốc. Kết quả trên ③C ở test có thể bị thổi lên.
@@ -440,13 +445,13 @@ Giấy phép:
 
 ---
 
-## 8. Ảnh hưởng tới v005 và v003
+## 8. Ảnh hưởng tới v006 và v003
 
-Các phát hiện sau cũng đúng cho v005 (và cho cách đọc kết quả v003); nên đưa vào nấc 0 của v005:
+Các phát hiện sau cũng đúng cho v006 (và cho cách đọc kết quả v003); nên đưa vào nấc 0 của v006:
 - **Lối tắt dữ liệu (§3):** thêm biên trộn hình của ⑥ theo biên từ, ③C nối 5 ms, bảng sửa cố định, co giãn không giới hạn.
-- **Một chi tiết bị ghi sai** ở W5 của file tổng hợp và trong review v005: giới hạn co giãn ±15 % chỉ có ở track A; track B co giãn không giới hạn. Câu W5 trong file tổng hợp đã được sửa.
+- **Một chi tiết bị ghi sai** ở W5 của file tổng hợp và trong review v006: giới hạn co giãn ±15 % chỉ có ở track A; track B co giãn không giới hạn. Câu W5 trong file tổng hợp đã được sửa.
 - **Encoder AntiDeepfake (P5)** không được thêm vào `features/encoders.py` (làm cũ cache XLS-R, mouth, LIPINC, wave); dùng module riêng như `syll`.
-- **G1 của v005** (biên −0,01): với cùng giả định SE, khi M5 (v005) thật sự ngang M1-v003 thì xác suất đạt chỉ khoảng 0,14 (○). Team nên xem lại biên hoặc ghi rõ lực.
+- **G1 của v006** (biên −0,01): với cùng giả định SE, khi M6 (v006) thật sự ngang M1-v003 thì xác suất đạt chỉ khoảng 0,14 (○). Team nên xem lại biên hoặc ghi rõ lực.
 - **`report.py` tính cổng trên seed đầu:** bước kết 3 seed của cả hai bản cần sửa chỗ này.
 - **Người test của part 1 ở bước kết** (§4.4): quyết định chung.
 
@@ -456,12 +461,12 @@ Các phát hiện sau cũng đúng cho v005 (và cho cách đọc kết quả v0
 
 | Quyết định | Đề xuất | Vì sao |
 |---|---|---|
-| Nhận v006 bản sau review ở mức nấc 0 | Đồng ý; quyết lại sau 0b', 0c' | Nấc 0 rẻ và quyết định được cả H-A lẫn H-B |
+| Nhận v007 bản sau review ở mức nấc 0 | Đồng ý; quyết lại sau 0b', 0c' | Nấc 0 rẻ và quyết định được cả H-A lẫn H-B |
 | Ai gán tay biên âm tiết (0b'), khép môi (0c'), vùng phương ngữ (0f) | Chia trong team, ~8–12 giờ công | Không có đáp án độc lập thì 0b', 0c' không có giá trị |
 | Biên của G1 | −0,03 kèm câu về lực; hoặc giữ −0,02 và ghi rõ đó là phép thử "không thua" | Chỉ có 10 người test |
-| Người test part 1 ở bước kết (chung với v005) | Chuyển sang train, loại mẫu của generator và giọng chỉ-test | Thêm dữ liệu mà giữ được lát "chưa thấy" |
+| Người test part 1 ở bước kết (chung với v006) | Chuyển sang train, loại mẫu của generator và giọng chỉ-test | Thêm dữ liệu mà giữ được lát "chưa thấy" |
 | Tập phân tích "② theo biên từ" chỉ cho val | Đồng ý (chỉ phân tích, không train) | Đo trực tiếp được lối tắt §3 |
-| Sửa dữ liệu (bảng sửa rộng hơn, giới hạn co giãn, bảng riêng cho test) | Cho phiên bản dữ liệu sau, không làm trong v006 | Đổi bước sinh, ảnh hưởng mọi model |
+| Sửa dữ liệu (bảng sửa rộng hơn, giới hạn co giãn, bảng riêng cho test) | Cho phiên bản dữ liệu sau, không làm trong v007 | Đổi bước sinh, ảnh hưởng mọi model |
 | Hỏi tác giả ViCocktail về giấy phép | Làm song song | Chặn nấc 2 nếu không có |
 | Cài MFA (env riêng) | Chỉ khi CTC trượt 0b' | Không thêm env khi chưa cần |
 
@@ -469,7 +474,7 @@ Các phát hiện sau cũng đúng cho v005 (và cho cách đọc kết quả v0
 
 ## 10. Nguồn
 
-**Nội bộ.** `plans/2026-10-30_v005-v006_de-xuat-detector.md` (bản trước review); `reviews/2026-10-30_review-v005.md` (review, có dòng code và URL cho từng phát hiện, kèm smoke check); `reviews/2026-10-28_review-v004.md`. Repo `VN-AV-DF-Capstone` commit `2b3a70c`: `src/vn_av_df/generation/generate.py`, `generation/cells.py`, `generation/plan.py`, `generation/voice/asr.py`, `voice/edit.py`, `voice/audio.py`; `src/vn_av_df/training/models.py`, `data.py`, `train.py`, `evaluate.py`, `report.py`, `prepare.py`; `src/vn_av_df/features/encoders.py`, `avhubert.py`, `avhubert_worker.py`; `src/vn_av_df/dataset.py`; `settings.py`; `docs/v003_data.md`, `docs/v003_model.md`, `docs/v003_generation.md`.
+**Nội bộ.** `plans/2026-10-30_v006-v007_de-xuat-detector.md` (bản trước review); `reviews/2026-10-30_review-v005.md` (review, có dòng code và URL cho từng phát hiện, kèm smoke check); `reviews/2026-10-28_review-v004.md`. Repo `VN-AV-DF-Capstone` commit `2b3a70c`: `src/vn_av_df/generation/generate.py`, `generation/cells.py`, `generation/plan.py`, `generation/voice/asr.py`, `voice/edit.py`, `voice/audio.py`; `src/vn_av_df/training/models.py`, `data.py`, `train.py`, `evaluate.py`, `report.py`, `prepare.py`; `src/vn_av_df/features/encoders.py`, `avhubert.py`, `avhubert_worker.py`; `src/vn_av_df/dataset.py`; `settings.py`; `docs/v003_data.md`, `docs/v003_model.md`, `docs/v003_generation.md`.
 
 **Web** (mở 30/10/2026 bởi mình hoặc reviewer)
 - Vietnamese phonology: [Wikipedia](https://en.wikipedia.org/wiki/Vietnamese_phonology) · Labial–velar consonant: [Wikipedia](https://en.wikipedia.org/wiki/Labial%E2%80%93velar_consonant)

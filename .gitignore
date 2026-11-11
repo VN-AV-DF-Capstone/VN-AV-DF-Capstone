@@ -67,3 +67,6 @@ experiments/**/checkpoints/
 experiments/**/*.log
 
 # Docs/configs/code and selected small experiment results are tracked normally.
+
+# Trình xem so sánh real / fake: nhúng metadata dataset, chỉ dùng ở máy
+/tools/viewer.html

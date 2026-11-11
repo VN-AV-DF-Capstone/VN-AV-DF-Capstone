@@ -1,4 +1,4 @@
-"""Cấu hình mặc định cho các file .py ở local (src/data/, src/generators/, src/models/v004/).
+"""Cấu hình mặc định cho các file .py ở local (src/data/, src/generators/, src/models/v005/).
 
 Trên Kaggle: chỉnh các cell cấu hình trong notebook, không cần sửa file này rồi upload lại.
 config() lấy giá trị hiện tại; trong notebook chỉ gọi nó sau khi chọn đường dẫn/model.
@@ -29,7 +29,7 @@ GENERATION_NAME = part_name()
 DATASET = ROOT / "data"  # Mỗi part đã chốt (real + fake) là data/vn-av-df-data-partN.
 # "all" = mọi part đã tải vào DATASET; hoặc ["vn-av-df-data-part1", ...].
 DATASET_PARTS = [part_name()]
-RUN_NAME = "train_all_v004"  # Output: runs/<RUN_NAME>/<model>_seed<seed>/. v003: train_part1_v003
+RUN_NAME = "train_all_v005"  # Output: runs/<RUN_NAME>/<model>_seed<seed>/. v004: train_all_v004; v003: train_part1_v003
 DEVICE = "cuda"  # Kaggle GPU. Use "cpu" for a local CPU-only environment.
 
 # Generator và hệ giọng: nhóm đầu dùng cho train/validation/test, nhóm sau chỉ ở test.
@@ -37,9 +37,10 @@ TRAIN_GENERATORS = ["wav2lip_gan", "musetalk_1_5", "iplap", "videoretalking"]
 TEST_ONLY_GENERATORS = ["latentsync_1_5", "diff2lip"]
 TRAIN_VOICES = ["vieneu", "f5_vi", "omnivoice", "seedvc"]
 TEST_ONLY_VOICES = ["voxcpm2", "vixtts"]
-# Đội hình v004 (RESEARCH_WORKLOG/v004_model.md §7). Baseline đúng code gốc như v003
-# (BL-V, BL-A, BL-M, BL-M/sup) + SpeechForensics (không train) + BL-A2 (XLS-R đóng băng); M1 (kiến
-# trúc v003) và M2 (giữ nguyên) train lại trên cache / nhãn mới; M3 = trihead_v4 (đề xuất v004).
+# Đội hình v005 (RESEARCH_WORKLOG/v005_model.md; v004: v004_model.md §7). Baseline đúng code gốc như v003
+# (BL-V, BL-A, BL-M, BL-M/sup) + SpeechForensics (không train) + BL-A2 (XLS-R đóng băng); M2 (giữ
+# nguyên) train lại trên cache / nhãn mới. v005 (chốt 07/11/2026): model chính M3-R = trihead_v5 (M3
+# gọn + học video nén).
 # Ghép muộn tính ở evaluate, không train: BL-Ens = max(BL-V, BL-A); BL-Ens-AV = max(BL-M/sup, BL-A2).
 MODELS = [
     "lipinc_v2",
@@ -48,19 +49,80 @@ MODELS = [
     "avh_align",
     "avh_align_sup",
     "speechforensics",
-    "trihead_v2",
     "avh_align_plus",
-    "trihead_v4",
+    "trihead_v5",
 ]
-# Ablation của M3: bỏ nhánh ngữ điệu ↔ đầu (đóng góp mới chính), bỏ kênh Φ, đầu visual nhận độ trễ
-# tuyệt đối như v003, bật tham chiếu người. Có thêm trong models.SPECS: trihead_v4_no_type và ablation
-# v003 của M1 (trihead_v2_no_sync / _no_trace / _no_ref).
+# Ablation của M3-R: bỏ cặp sạch ↔ nén (nhất quán), thêm nhánh chất lượng, không học nén. Thử nghiệm
+# 07/11 (part 3, 1.600 step): nhánh ngữ điệu, Φ riêng, tham chiếu người không giúp nên ablation v4 cũ
+# (trihead_v4_no_prosody / _no_phi / _abs / _ref) chỉ còn trong models.SPECS, chạy tay bằng GROUP lẻ nếu cần.
+# 11/11: báo cáo v005 chỉ so BL ↔ M và ablation của M3-R; bản cũ (M1 = trihead_v2, M3 v004 = trihead_v4)
+# đã so ở thử nghiệm nhỏ trước khi chọn M3-R nên bỏ khỏi đội hình (vẫn trong models.SPECS).
 ABLATIONS = [
-    "trihead_v4_no_prosody",
-    "trihead_v4_no_phi",
-    "trihead_v4_abs",
-    "trihead_v4_ref",
+    "trihead_v5_no_pair",
+    "trihead_v5_quality",
+    "trihead_v5_clean",
 ]
+# Biến thể dữ liệu v005 (RESEARCH_WORKLOG/v005_model.md §8-9), mỗi biến thể một phiên prepare cùng tên
+# (landmark dùng lại của bản gốc; trích avhubert / mouth / xlsr trên bản đã xử lý, giữ số frame).
+# - c480, c360: nén lại video + tiếng như khi đăng lại mạng xã hội (libx264 + AAC). TRAIN (M3-R theo cặp
+#   sạch ↔ bản nén) + test. Thử nghiệm 07-08/11: chỉ học c480 thì real 360p bị báo AI 40 % (nhánh
+#   đồng bộ đọc môi kém ở 360p), nên học cả hai mức.
+# - pr ("processed real"): video của real / sham / voice qua xử lý lành tính giống đường ống generator
+#   (x264 CRF 8 → codec / co giãn → x264 CRF 18), tiếng giữ nguyên, nhãn giữ nguyên: phép thử "model phát
+#   hiện AI thật hay dấu vết đường ống" (validation: đường học; test: một nửa 4 họ thường, một nửa 3 họ
+#   khác, prepare.processed_real_chain). KHÔNG train: thử 07-08/11, M3-R không học PR đã không bị PR
+#   đánh lừa (FPR 0,01-0,02) và học thêm PR không đổi kết quả (2 phép so).
+# - w360 (VP9 360p + Opus), c288 (x264 288p): CHỈ test (mức không có khi train: codec khác cùng độ phân
+#   giải, độ phân giải thấp hơn); chỉ nén mẫu test.
+VARIANTS = {
+    "c480": {
+        "name": "c480",
+        "height": 480,
+        "crf": 30,
+        "audio_bitrate": "64k",
+        "preset": "veryfast",
+        "train": True,
+    },
+    "c360": {
+        "name": "c360",
+        "height": 360,
+        "crf": 35,
+        "audio_bitrate": "32k",
+        "preset": "veryfast",
+        "train": True,
+    },
+    "pr": {
+        "name": "pr",
+        "kind": "processed_real",
+        "cells": ["real", "sham", "voice"],
+        "families": ["mp4v", "mjpeg", "rescale", "x264mid"],
+        "heldout_families": ["vp9", "denoise_sharpen", "mpeg2"],
+        "splits": ["validation", "test"],
+        "train": False,
+    },
+    "w360": {
+        "name": "w360",
+        "height": 360,
+        "video_codec": "libvpx-vp9",
+        "crf": 40,
+        "audio_codec": "libopus",
+        "audio_bitrate": "32k",
+        "splits": ["test"],
+        "train": False,
+    },
+    "c288": {
+        "name": "c288",
+        "height": 288,
+        "crf": 37,
+        "audio_bitrate": "24k",
+        "preset": "veryfast",
+        "splits": ["test"],
+        "train": False,
+    },
+}
+# Cổng độ phân giải (v005 §9): video có cạnh ngắn dưới mức train thấp nhất (c360) → không xét hình, AI? = audio.
+# Đo 08/11 ở 288p (chưa có khi train): mọi model dựa AV-HuBERT AUC ~0,5, báo AI 94-100 % real; có cổng: FPR 0,01-0,03.
+VISUAL_MIN_SHORT_SIDE = 360
 SEEDS = [42]  # lượt đầu một seed; chốt thiết kế rồi mới chạy [42, 43, 44]
 # Bước train v004 (RESEARCH_WORKLOG/v004_model.md §8): **mỗi bước một model** (BL-M đi kèm SF vì SF
 # không train), mỗi bước một phiên Kaggle một GPU, để quản lý / bỏ từng model. Thứ tự = ưu tiên:
@@ -69,20 +131,24 @@ SEEDS = [42]  # lượt đầu một seed; chốt thiết kế rồi mới chạ
 # benchmark mọi model trên cache thật trước để chốt lại. Train xong mỗi bước thì test ngay model
 # đó trên test cả 3 part; bước "report" (CPU) gộp mọi bước, ghép muộn, cổng, report.md.
 TRAIN_GROUPS = {
-    "M3": {
-        "title": "M3 (đề xuất v004) + benchmark mọi model",
-        "lanes": [["trihead_v4"]],
+    "M3-R": {
+        "title": "M3-R (v005: M3 gọn + học video nén) + benchmark mọi model",
+        "lanes": [["trihead_v5"]],
         "benchmark": True,
-        "hours": [3, 7],
+        # ○ Cặp sạch + nén: mỗi epoch xử lý mỗi mẫu 2 lần; giây / step như bản không cặp (07/11: 1.075
+        # so với 1.042 s / 1.600 step) nên giờ / epoch ≈ 2 lần; dừng ở MAX_HOURS thì phiên sau chạy tiếp.
+        # 08/11: M3 v004 thật mất 34,5 giờ (75-96 phút / epoch) vì đọc /kaggle/input ~20 MB/s; với chép cache
+        # sang ổ local (STAGE_LOCAL, training/stage.py) ước lại theo phần tính toán ~20-30 phút / epoch.
+        "hours": [9, 18],
         "tier": "core",
-        "gates": ["mọi cổng V"],
+        "gates": ["mọi cổng R", "V2", "V3", "V6", "V7"],
     },
-    "M3-noprosody": {
-        "title": "M3 bỏ nhánh ngữ điệu–đầu (ý tưởng mới)",
-        "lanes": [["trihead_v4_no_prosody"]],
-        "hours": [3, 6.5],
+    "M3-R-nopair": {
+        "title": "M3-R bỏ cặp sạch ↔ nén (bản nén lấy ngẫu nhiên, không loss nhất quán)",
+        "lanes": [["trihead_v5_no_pair"]],
+        "hours": [5, 11],
         "tier": "core",
-        "gates": ["V9", "V10", "V11"],
+        "gates": ["R6"],
     },
     "M2": {
         "title": "M2 (AVH-Align+, giữ nguyên v003)",
@@ -119,26 +185,21 @@ TRAIN_GROUPS = {
         "tier": "core",
         "gates": ["BL-Ens"],
     },
-    "M1": {
-        "title": "M1 (kiến trúc v003, có tham chiếu người): 2-3 phiên",
-        "lanes": [["trihead_v2"]],
-        "hours": [12.3, 24.5],
-        "tier": "core",
-        "gates": ["V1"],
-    },
-    "M3-nophi": {
-        "title": "M3 bỏ kênh Φ",
-        "lanes": [["trihead_v4_no_phi"]],
-        "hours": [3, 6.5],
+    "M3-R-quality": {
+        "title": "M3-R thêm nhánh chất lượng (FiLM theo độ phân giải miệng + đầu phụ 'bị nén')",
+        "lanes": [["trihead_v5_quality"]],
+        # ○ 11/11: theo cặp như M3-R (thật: 25 epoch, 48-64 phút / epoch, ~21 h) → ~2 phiên.
+        "hours": [18, 23],
         "tier": "optional",
-        "gates": ["V4"],
+        "gates": ["R5"],
     },
-    "M3-abs": {
-        "title": "M3 với độ trễ tuyệt đối ở đầu visual (như v003)",
-        "lanes": [["trihead_v4_abs"]],
-        "hours": [3, 6.5],
+    "M3-R-clean": {
+        "title": "M3-R không học nén (chỉ bản gốc)",
+        "lanes": [["trihead_v5_clean"]],
+        # ○ 11/11: số step như M3-R-nopair (thật: ~27 phút / epoch, > 24 epoch).
+        "hours": [11, 14],
         "tier": "optional",
-        "gates": ["V8"],
+        "gates": ["R4"],
     },
     "BL-A": {
         "title": "BL-A (SSL-AASIST fine-tune XLS-R; v003 không học được): 1-4 phiên",
@@ -147,44 +208,46 @@ TRAIN_GROUPS = {
         "tier": "optional",
         "gates": ["BL-Ens"],
     },
-    "M3-ref": {
-        "title": "M3 bật tham chiếu người: 1-3 phiên",
-        "lanes": [["trihead_v4_ref"]],
-        "hours": [10, 25],
-        "tier": "optional",
-        "gates": ["V5"],
-    },
 }
-# Phiên Kaggle T4 ×2 (1 giờ T4 ×2 trừ 1 giờ quota: thông báo T4 của Kaggle): hai hàng song song,
-# mỗi hàng một GPU, các bước trong một hàng chạy nối tiếp; model nào xong thì test ngay. Bỏ bước
-# nào thì xoá khỏi hàng (notebook: DROP). P4 / P5: PREVIOUS_RUN = Output phiên trước để M1 /
-# BL-A / M3-ref chạy tiếp từ last.pt. Giờ ○ ở RESEARCH_WORKLOG/v004_model.md §8.2.
+# Phiên Kaggle T4 ×2 (1 giờ T4 ×2 trừ 1 giờ quota: thông báo T4 của Kaggle): các hàng chạy song song, các bước
+# trong một hàng chạy nối tiếp. v005: hàng đầu dùng riêng GPU0 (model nặng), các hàng sau chia GPU còn lại
+# (training.lanes.lane_devices): baseline nhẹ (BL-M/sup, BL-A2, M2, BL-M, BL-V: < 1,2 GB VRAM ở benchmark v004)
+# chạy đồng thời trên GPU1. Phiên train CHỈ train; test chấm một lần ở GROUP = "test" sau khi train xong hết
+# (một run W&B cho test + báo cáo). Model chưa xong ở MAX_HOURS thì chạy lại phiên đó với PREVIOUS_RUN (bước đã
+# xong được bỏ qua): P2 tiếp M3-R, M2 của P1 và BL-M (P1 hết giờ trước khi tới BL-M, 10/11). M3-R-nopair hết
+# giờ ở P2 (epoch 24, 11/11): chạy tiếp riêng bằng GROUP = "M3-R-nopair" trước test. P3-P5 tuỳ chọn (sau báo cáo):
+# P4 tiếp quality + clean rồi BL-A; P5 tiếp BL-A (+ quality nếu còn dở). PREVIOUS_RUN = mọi phiên trước.
 TRAIN_SESSIONS = {
-    "P1": [["M3"], ["M3-noprosody"]],
-    "P2": [["BL-Msup"], ["BL-A2", "BL-V", "M2", "BL-M"]],
-    "P3": [["M1"], ["M3-nophi", "M3-abs"]],
-    "P4": [["M1"], ["M3-ref"]],
-    "P5": [["BL-A"], ["M3-ref", "M1"]],
+    "P1": [["M3-R"], ["BL-Msup", "M2", "BL-M"], ["BL-A2", "BL-V"]],
+    "P2": [["M3-R"], ["M3-R-nopair"], ["M2", "BL-M"]],
+    "P3": [["M3-R-quality"], ["M3-R-clean"]],
+    "P4": [["M3-R-quality"], ["M3-R-clean", "BL-A"]],
+    "P5": [["BL-A"], ["M3-R-quality"]],
 }
 # Đội hình đầy đủ: notebook in model nào chưa train xong; report gồm các model đã có (cổng thiếu
 # model thì bỏ qua).
 TEST_MODELS = MODELS + ABLATIONS
-# v005 · M5 và v006 · M6 (docs/v005-v006_de-xuat-detector.md, docs/v006_sau-review.md): đã có code,
-# chưa train. Script src/models/v005|v006 gọi bootstrap("v005" | "v006"): chỉ đổi đội hình, seed và
-# thư mục run; cách train như v004 của Linh (nhãn mismatch `mismatch_labels`, dịch tiếng −2…+5,
-# chọn checkpoint theo val AUC, plateau, XLS-R 5 nhóm lớp) để so được với M1, M3 train lại ở v004.
+# v006 · M6 và v007 · M7 (đề xuất của MN; docs/v006-v007_de-xuat-detector.md, docs/v007_sau-review.md):
+# chưa train. Script src/models/v006|v007 gọi bootstrap("v006" | "v007"): chỉ đổi đội
+# hình, seed và thư mục run; cách train như v005 của Linh (nhãn mismatch `mismatch_labels`, dịch
+# tiếng −2…+5, học thêm bản nén c480 / c360 với xác suất `variant_p`, chọn checkpoint theo val AUC
+# trung bình bản sạch + bản nén, plateau, XLS-R 5 nhóm lớp) để so được với M3-R của v005.
 VERSIONS = {
-    "v005": {
-        "models": ["trihead_v3"],
-        "ablations": ["trihead_v3_p1", "trihead_v3_p123"],  # cộng dồn: +P1, +P1-P3
-        "seeds": [42],
-        "run_name": "train_all_v005",
-    },
+    # M6 (MN chốt 11/11): nền M3-R (trihead_v5) + P4, P5, P6. P1-P3 (trihead_v3, code giữ trong
+    # models.SPECS) bỏ khỏi đội hình: ablation v004 / v005 của Linh đã trả lời. P4, P6 ở evaluate
+    # (mọi model); P5 (front-end giọng) chưa có encoder. Nấc 0 không cần train: chép run M3-R v005
+    # vào runs/train_all_v006/ rồi chạy src/models/v006/03_evaluate.py.
     "v006": {
+        "models": ["trihead_v5"],
+        "ablations": [],
+        "seeds": [42],
+        "run_name": "train_all_v006",
+    },
+    "v007": {
         "models": ["visyl"],
         "ablations": ["visyl_no_phon", "visyl_uniform_no_phon", "visyl_shuffled_tags"],
         "seeds": [42, 43, 44, 45, 46],
-        "run_name": "train_all_v006",
+        "run_name": "train_all_v007",
     },
 }
 VERSION = None  # bootstrap(version) đặt
@@ -297,19 +360,25 @@ def config():
             # Mỗi người 15-20 clip: lấy mẫu train theo 1 / số clip của người đó để mỗi người đóng
             # góp như nhau (docs/v003_model.md §7).
             "speaker_balance": True,
+            # Học video nén (cfg["variants"], v005): model không học nhất quán lấy bản nén
+            # với xác suất này (mọi đặc trưng của mẫu cùng lấy từ bản nén); M3-R học theo cặp.
+            "variant_p": 0.5,
         },
         "bootstrap_replicates": 1000,
         # Nhãn mismatch (training/sync_labels.py, RESEARCH_WORKLOG/v004_model.md §5):
         # "measured" = lệch nội dung theo cách tạo + ô lip-sync đo tại lag 0 so với real (cần
-        # avhubert/sync_profile.json từ prepare và <part>/sync_syncnet.json từ src/models/v004/01a_syncnet.py);
-        # "mask_lipsync" = dự phòng không cần đo (ô lip-sync → mask); "construction" = như v003.
+        # <part>/sync_syncnet.json từ src/models/v005/01a_syncnet.py); "mask_lipsync" = dự phòng không cần
+        # đo (ô lip-sync → mask); "construction" = như v003.
+        # User chốt 03/11: một thước SyncNet, một ngưỡng p95 của real train. Cổng độ nhọn hạ về mức
+        # thấp nhất của real train nên train không còn mask; validation, test còn 14 mẫu lip-sync
+        # mask vì 3 clip real gốc nhọn dưới mức đó.
         "mismatch_labels": {
             "mode": "measured",
-            "meters": ["avhubert", "syncnet"],
+            "meters": ["syncnet"],
             "near_shift": 1,
             "negative_quantile": 0.95,
-            "positive_quantile": 0.99,
-            "sharpness_quantile": 0.10,
+            "positive_quantile": 0.95,
+            "sharpness_quantile": 0.0,
         },
     }
     cfg["encoders"] = {
@@ -354,11 +423,14 @@ def config():
         "mouth": {"kind": "mouth", "crop": 96, "box_max_side": 640, "cpu_only": True},
         "lipinc": {"kind": "lipinc", "box_max_side": 640, "cpu_only": True},
         "wave": {"kind": "wave", "cpu_only": True},
-        # v006: PhoWhisper trên tiếng của mẫu → đơn vị âm tiết + thẻ (features/syllables.py).
+        # v007 (M7 ViSyl): PhoWhisper trên tiếng của mẫu → đơn vị âm tiết + thẻ (features/syllables.py).
         "syll": {"kind": "syll", "model": "vinai/PhoWhisper-small", "device": DEVICE},
     }
     # Tài sản dựng model: XLS-R gốc cho BL-A fine-tune; checkpoint AVH-Align công bố (train trên
     # 45 k video real AV-1M, commit đã pin) để khởi tạo BL-M và Φ của M2.
+    # Đặc tả biến thể (train hay chỉ test, PR): train.py / evaluate.py đọc; thư mục cache ở cfg["variants"].
+    cfg["variant_specs"] = VARIANTS
+    cfg["visual_min_short_side"] = VISUAL_MIN_SHORT_SIDE
     cfg["model_assets"] = {
         "xlsr": cfg["encoders"]["xlsr"]["model"],
         "avh_align_init": str(ROOT / "weights/avh_align/AVH-Align_AV1M.pt"),
@@ -374,7 +446,7 @@ def config():
 
 
 def bootstrap(version=None):
-    """version: "v005" | "v006" cho script src/models/<version>/ (xem VERSIONS)."""
+    """version: "v006" | "v007" cho script src/models/<version>/ (xem VERSIONS)."""
     global VERSION
     VERSION = version
     sys.dont_write_bytecode = True

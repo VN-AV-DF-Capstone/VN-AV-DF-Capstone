@@ -5,26 +5,29 @@
 | v001 | [v001/](v001/) | 16/09 - 10/10/2026 | `VN-AV-DF-Capstone/vn-av-consistency-deepfake` @ `4c239de` | Pseudo-fake FATE, encoder PE-AV / FATE adapter / AV-HuBERT / DINOv2, so sánh theo ô 2×2 |
 | v002 | [v002/](v002/) | 11/10 - 14/10/2026 | `VN-AV-DF-Capstone/vn-av-consistency-deepfake` @ `1779279` | Bỏ FATE, thêm MechFake (pseudo-fake rẻ) và TriCue |
 | v003 | [v003/](v003/) + [`src/vn_av_df/`](../vn_av_df/) | từ 18/10/2026 | `linhxm/vn-av-df-forensics` @ `b017a27` | Bản đang dùng: baseline BL-V `lipinc_v2`, BL-A `ssl_aasist`, BL-M `avh_align`, BL-M/sup `avh_align_sup`, BL-Ens; đề xuất M1 `trihead_v2`, M2 `avh_align_plus` + ablation ([docs/v003_model.md](../../docs/v003_model.md)) |
-| v005 | [v005/](v005/) + [`src/vn_av_df/`](../vn_av_df/) | code 03/11/2026, chưa train | đề xuất của MN ([docs](../../docs/v005-v006_de-xuat-detector.md) §2) | M5 `trihead_v3` = M1 + P1-P4 (+ ablation cộng dồn `trihead_v3_p1`, `trihead_v3_p123`); P4, P6 trong `evaluate.py` |
-| v006 | [v006/](v006/) + [`src/vn_av_df/`](../vn_av_df/) | code 03/11/2026, chưa train | đề xuất của MN ([docs](../../docs/v006_sau-review.md)) | M6 `visyl` theo âm tiết tiếng Việt (+ `visyl_no_phon`, `visyl_uniform_no_phon`, `visyl_shuffled_tags`), cache `syll` |
-| v004 | [v004/](v004/) + [`src/vn_av_df/`](../vn_av_df/) | từ 03/11/2026 | `linhxm/vn-av-df-forensics` @ `36942ca` | Bản đang dùng: nhãn mismatch đo được, M3 `trihead_v4` (+ ablation `_no_prosody`, `_no_phi`, `_abs`, `_ref`, `_no_type`), BL-A2 `xlsr_frozen`, `speechforensics`; giữ M1, M2 và baseline v003 |
+| v004 | [v004/](v004/) + [`src/vn_av_df/`](../vn_av_df/) | từ 03/11/2026 | `linhxm/vn-av-df-forensics` @ `36942ca` | Nhãn mismatch đo được, M3 `trihead_v4` (+ ablation `_no_prosody`, `_no_phi`, `_abs`, `_ref`, `_no_type`), BL-A2 `xlsr_frozen`, `speechforensics`; giữ M1, M2 và baseline v003 |
+| v005 | [v005/](v005/) + [`src/vn_av_df/`](../vn_av_df/) | từ 11/11/2026 | `linhxm/vn-av-df-forensics` @ `a1d0dd2` | Bản đang dùng: M3-R `trihead_v5` (M3 gọn, học thêm bản nén 480p / 360p theo cặp + loss nhất quán, sham là mẫu âm, cổng độ phân giải) (+ ablation `_no_pair`, `_quality`, `_clean`); đã train trên Kaggle, kết quả ở [docs/v005_report.md](../../docs/v005_report.md) |
+| v006 | [v006/](v006/) + [`src/vn_av_df/`](../vn_av_df/) | đổi 11/11/2026, chưa train | đề xuất của MN ([docs](../../docs/v006-v007_de-xuat-detector.md) §0b) | M6 = nền M3-R `trihead_v5` + P4, P6 (`evaluate.py`, mọi model) + P5 (chưa làm). `trihead_v3` (M1 + P1-P4, đề xuất cũ) còn trong `models.SPECS`, không trong đội hình |
+| v007 | [v007/](v007/) + [`src/vn_av_df/`](../vn_av_df/) | code 03/11/2026, chưa train | đề xuất của MN ([docs](../../docs/v007_sau-review.md)) | M7 `visyl` theo âm tiết tiếng Việt (+ `visyl_no_phon`, `visyl_uniform_no_phon`, `visyl_shuffled_tags`), cache `syll` |
 
-## v005, v006 (đã có code, chưa train)
+## v006, v007 (đề xuất của MN, chưa train)
 
-Script ở `v005/`, `v006/` giống v003 nhưng gọi `bootstrap("v005" | "v006")` (`settings.VERSIONS`): đội hình, seed và thư mục run riêng (`runs/train_all_v005|v006`); cách train giữ như v004 của Linh (nhãn mismatch đo được theo `mismatch_labels`, dịch tiếng −2…+5, chọn checkpoint theo val AUC, plateau, XLS-R 5 nhóm lớp), để so cùng điều kiện với M1, M3 train lại ở v004. Đổi luật nhãn mismatch trong `settings.py` thì v004, v005, v006 đổi cùng nhau. v006 cần thêm cache `syll`: `src/models/v006/01_prepare.py --encoders syll` (PhoWhisper trên tiếng từng mẫu).
+Script ở `v006/`, `v007/` giống v005 nhưng gọi `bootstrap("v006" | "v007")` (`settings.VERSIONS`): đội hình, seed và thư mục run riêng (`runs/train_all_v006|v007`); cách train giữ như v005 của Linh (nhãn mismatch đo được, dịch tiếng −2…+5, học thêm bản nén c480 / c360, chọn checkpoint theo val AUC trung bình bản sạch và bản nén). Trước 11/11 hai bản này tên là v005 · M5 và v006 · M6.
 
-- v005: `TriHeadV3` trong `models.py` (P1 `PureSyncTrunk`, P2 `VisualTrunk`, P3 mỗi đầu một nhánh, P4 bỏ FiLM). P4 (`postprocess_p4`) và P6 (`localization_p6`) tính trong `evaluate.py` cho **mọi** model, để M1-v003 chấm lại (`03_evaluate.py --force`) cùng hậu xử lý. Với P3, đầu visual của M5 chỉ nhận nhánh V (không có tiếng) nên không thấy độ trễ. Chưa có: P5 (front-end giọng, chờ zero-shot), cổng G1-G7 trong `report.py`.
-- v006: `ViSyl` trong `models.py` (như v004: đường gộp, tức đầu visual, chỉ thấy hồ sơ khớp đã dời về độ trễ chung của clip; độ trễ chung chỉ vào đầu mismatch), `features/syllables.py` (luật chính tả → thẻ, đơn vị âm tiết), pseudo-fake theo đơn vị trong `data.replace_audio`. Chưa có: bước 0 (0b' chọn bộ căn, 0c' pilot khép môi), hình học môi và kỳ vọng theo người, phép đảo thẻ lúc suy luận, cổng G1-G8.
+- v006 · M6 (MN chốt 11/11): nền M3-R `trihead_v5` + P4 (`postprocess_p4`), P6 (`localization_p6`) trong `evaluate.py`, tính cho **mọi** model; P5 (front-end giọng) chưa có encoder. Nấc 0 không cần train: chép run `trihead_v5_seed42` của v005 vào `runs/train_all_v006/` rồi chạy `v006/03_evaluate.py`. Lý do bỏ P1-P3: bảng §0b của [đề xuất](../../docs/v006-v007_de-xuat-detector.md).
+- v007 · M7: `ViSyl` trong `models.py` (đường gộp, tức đầu visual, chỉ thấy hồ sơ khớp đã dời về độ trễ chung của clip; độ trễ chung chỉ vào đầu mismatch; như M3-R: sham là mẫu âm của đầu visual, tắt ngẫu nhiên nhóm lớp XLS-R), `features/syllables.py` (luật chính tả → thẻ khẩu hình, PhoWhisper DTW). Cần thêm cache `syll`: `v007/01_prepare.py --encoders syll`; bản nén c480 / c360 cũng trích `syll` (ASR trên tiếng đã nén).
 
-## v004 (đang dùng)
+## v005 (đang dùng)
 
-Script ở `v004/`: như v003 và thêm `01a_syncnet.py` (đo SyncNet ở local, CPU) và `01b_sync_labels.py` (nhãn mismatch đo được). Code model ở `src/vn_av_df/training/` (`models.py` lớp `TriHeadV4`, `sync_labels.py`, `syncnet_measure.py`, `prosody.py`); cấu hình `settings.py` (`MODELS`, `ABLATIONS`, `TRAIN_GROUPS`, `TRAIN_SESSIONS`, `training.mismatch_labels`). Tài liệu thiết kế `RESEARCH_WORKLOG/v004_model.md` của Linh chưa có trên git.
+Script ở `v005/`: như v004 (cả `01a_syncnet.py`, `01b_sync_labels.py`). Code model ở `src/vn_av_df/training/` (`models.py` lớp `TriHeadV5`, `stage.py` chép cache sang đĩa local trên Kaggle; biến thể nén trong `prepare.py`, `data.py`, `train.py`, `evaluate.py`). Biến thể ở `settings.VARIANTS`: c480, c360 (train + test), pr, w360, c288 (chỉ đánh giá). Kết quả: [docs/v005_report.md](../../docs/v005_report.md), [docs/v004_report.md](../../docs/v004_report.md).
 
-Khác v003 cần biết: chọn checkpoint theo val AUC (v003: val loss), `audio_lag_aug` [−2, +5] (v003: [−1, +2]), XLS-R 5 nhóm lớp (cache `xlsr` của v003 phải trích lại), W&B project `vn-av-df-v004`.
+## v004
+
+Script `v004/` vẫn chạy được nhưng dùng `settings.py` hiện tại (cấu hình v005). Muốn chạy lại đúng v004 thì checkout `f28a57b`. Khác v003 cần biết: chọn checkpoint theo val AUC (v003: val loss), `audio_lag_aug` [−2, +5] (v003: [−1, +2]), XLS-R 5 nhóm lớp (cache `xlsr` của v003 phải trích lại).
 
 ## v003
 
-Script `v003/` vẫn chạy được nhưng dùng `settings.py` hiện tại (cấu hình v004). Muốn chạy lại đúng v003 thì checkout commit trước khi gộp v004 (`2b3a70c`).
+Script `v003/` vẫn chạy được nhưng dùng `settings.py` hiện tại (cấu hình v005). Muốn chạy lại đúng v003 thì checkout commit trước khi gộp v004 (`2b3a70c`).
 
 Script các bước nằm ở `v003/` (00 tải encoder, 01 trích feature, 02 train, 03 test, 04 báo cáo, 05 đo thời gian); code model nằm trong package chung `src/vn_av_df/training/`. Cách chạy: [PIPELINE.md](../../PIPELINE.md).
 

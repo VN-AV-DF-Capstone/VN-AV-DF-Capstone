@@ -8,8 +8,9 @@
 - [v003_data](v003_data.md): pipeline dữ liệu real, số người / clip, độ lệch tiếng-hình.
 - [v003_generation](v003_generation.md): sáu ô, generator và giọng AI, số mẫu mỗi part.
 - [v003_model](v003_model.md): phương pháp, baseline, model đề xuất, cách đánh giá.
-- [Model theo phiên bản](../src/models/README.md): v001-v006.
-- Đề xuất detector [v005 · M5 và v006 · M6](v005-v006_de-xuat-detector.md) và [v006 sau review](v006_sau-review.md) (của MN; đã có code, chưa train).
+- [Model theo phiên bản](../src/models/README.md): v001-v007.
+- Báo cáo của Linh: [v004](v004_report.md) (M3, nhãn mismatch đo được) và [v005](v005_report.md) (M3-R, video nén), bảng sinh tự động ở `v004_results/`, `v005_results/`.
+- Đề xuất detector [v006 · M6 và v007 · M7](v006-v007_de-xuat-detector.md) và [v007 sau review](v007_sau-review.md) (của MN; chưa train; trước 11/11 tên v005 · M5 và v006 · M6).
 - Báo cáo kết quả [v001](reports/2026-10-15_V001_REPORT.md) (FATE, part1) và [v002](reports/2026-10-15_V002_REPORT.md) (MechFake + TriCue), tiếng Anh, của Linh.
 
 Ba file `v003_*.md` giữ nguyên bản của nhóm. Đường dẫn trong đó theo repo `vn-av-df-forensics`: `data_pipeline/` nay là `src/data/` (workspace `data/v003/`, export `data/exports/`), `generation/0x` là `src/generators/0x`, `training/0x` là `src/models/v003/0x`.
