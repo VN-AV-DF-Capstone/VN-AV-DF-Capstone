@@ -1,4 +1,4 @@
-"""Cấu hình mặc định cho các file .py ở local (src/data/, src/generators/, src/models/v005/).
+"""Cấu hình mặc định cho các file .py ở local (src/data/, src/generators/, src/models/v006/).
 
 Trên Kaggle: chỉnh các cell cấu hình trong notebook, không cần sửa file này rồi upload lại.
 config() lấy giá trị hiện tại; trong notebook chỉ gọi nó sau khi chọn đường dẫn/model.
@@ -29,7 +29,8 @@ GENERATION_NAME = part_name()
 DATASET = ROOT / "data"  # Mỗi part đã chốt (real + fake) là data/vn-av-df-data-partN.
 # "all" = mọi part đã tải vào DATASET; hoặc ["vn-av-df-data-part1", ...].
 DATASET_PARTS = [part_name()]
-RUN_NAME = "train_all_v005"  # Output: runs/<RUN_NAME>/<model>_seed<seed>/. v004: train_all_v004; v003: train_part1_v003
+VERSION = "v006"  # tiêu đề report.md; RESEARCH_WORKLOG/v006_model.md
+RUN_NAME = "train_all_v006"  # Output: runs/<RUN_NAME>/<model>_seed<seed>/. v005: train_all_v005; v004: train_all_v004
 DEVICE = "cuda"  # Kaggle GPU. Use "cpu" for a local CPU-only environment.
 
 # Generator và hệ giọng: nhóm đầu dùng cho train/validation/test, nhóm sau chỉ ở test.
@@ -123,7 +124,9 @@ VARIANTS = {
 # Cổng độ phân giải (v005 §9): video có cạnh ngắn dưới mức train thấp nhất (c360) → không xét hình, AI? = audio.
 # Đo 08/11 ở 288p (chưa có khi train): mọi model dựa AV-HuBERT AUC ~0,5, báo AI 94-100 % real; có cổng: FPR 0,01-0,03.
 VISUAL_MIN_SHORT_SIDE = 360
-SEEDS = [42]  # lượt đầu một seed; chốt thiết kế rồi mới chạy [42, 43, 44]
+# v006 (12/11): train lại đội hình v005 trên seed 43, có đo dày validation ở 3 epoch đầu (training.dense_val).
+# v005 (seed 42) ở branch v005, runs/train_all_v005.
+SEEDS = [43]
 # Bước train v004 (RESEARCH_WORKLOG/v004_model.md §8): **mỗi bước một model** (BL-M đi kèm SF vì SF
 # không train), mỗi bước một phiên Kaggle một GPU, để quản lý / bỏ từng model. Thứ tự = ưu tiên:
 # "core" là đội hình tối thiểu cho kết luận chính; "optional" bỏ được (mất cổng ghi ở "gates").
@@ -217,18 +220,21 @@ TRAIN_GROUPS = {
 # xong được bỏ qua): P2 tiếp M3-R, M2 của P1 và BL-M (P1 hết giờ trước khi tới BL-M, 10/11). M3-R-nopair hết
 # giờ ở P2 (epoch 24, 11/11): chạy tiếp riêng bằng GROUP = "M3-R-nopair" trước test. P3-P5 tuỳ chọn (sau báo cáo):
 # P4 tiếp quality + clean rồi BL-A; P5 tiếp BL-A (+ quality nếu còn dở). PREVIOUS_RUN = mọi phiên trước.
+# v006: như v005 (P1, P2) cộng P3 = phần còn dở của M3-R và M3-R −cặp (đo dày thêm ~1,2 giờ mỗi model
+# nặng; v005 M3-R 21,3 giờ, −cặp 12,8 giờ). Tuỳ chọn P4-P6 (ablation, BL-A) sau báo cáo.
 TRAIN_SESSIONS = {
     "P1": [["M3-R"], ["BL-Msup", "M2", "BL-M"], ["BL-A2", "BL-V"]],
     "P2": [["M3-R"], ["M3-R-nopair"], ["M2", "BL-M"]],
-    "P3": [["M3-R-quality"], ["M3-R-clean"]],
-    "P4": [["M3-R-quality"], ["M3-R-clean", "BL-A"]],
-    "P5": [["BL-A"], ["M3-R-quality"]],
+    "P3": [["M3-R"], ["M3-R-nopair"]],
+    "P4": [["M3-R-quality"], ["M3-R-clean"]],
+    "P5": [["M3-R-quality"], ["M3-R-clean", "BL-A"]],
+    "P6": [["BL-A"], ["M3-R-quality"]],
 }
 # Đội hình đầy đủ: notebook in model nào chưa train xong; report gồm các model đã có (cổng thiếu
 # model thì bỏ qua).
 TEST_MODELS = MODELS + ABLATIONS
-# v006 · M6 và v007 · M7 (đề xuất của MN; docs/v006-v007_de-xuat-detector.md, docs/v007_sau-review.md):
-# chưa train. Script src/models/v006|v007 gọi bootstrap("v006" | "v007"): chỉ đổi đội
+# v007 · M6 và v008 · M7 (đề xuất của MN; docs/v007-v008_de-xuat-detector.md, docs/v008_sau-review.md):
+# chưa train. Script src/models/v007|v008 gọi bootstrap("v007" | "v008"): chỉ đổi đội
 # hình, seed và thư mục run; cách train như v005 của Linh (nhãn mismatch `mismatch_labels`, dịch
 # tiếng −2…+5, học thêm bản nén c480 / c360 với xác suất `variant_p`, chọn checkpoint theo val AUC
 # trung bình bản sạch + bản nén, plateau, XLS-R 5 nhóm lớp) để so được với M3-R của v005.
@@ -236,21 +242,20 @@ VERSIONS = {
     # M6 (MN chốt 11/11): nền M3-R (trihead_v5) + P4, P5, P6. P1-P3 (trihead_v3, code giữ trong
     # models.SPECS) bỏ khỏi đội hình: ablation v004 / v005 của Linh đã trả lời. P4, P6 ở evaluate
     # (mọi model); P5 (front-end giọng) chưa có encoder. Nấc 0 không cần train: chép run M3-R v005
-    # vào runs/train_all_v006/ rồi chạy src/models/v006/03_evaluate.py.
-    "v006": {
+    # vào runs/train_all_v007/ rồi chạy src/models/v007/03_evaluate.py.
+    "v007": {
         "models": ["trihead_v5"],
         "ablations": [],
         "seeds": [42],
-        "run_name": "train_all_v006",
+        "run_name": "train_all_v007",
     },
-    "v007": {
+    "v008": {
         "models": ["visyl"],
         "ablations": ["visyl_no_phon", "visyl_uniform_no_phon", "visyl_shuffled_tags"],
         "seeds": [42, 43, 44, 45, 46],
-        "run_name": "train_all_v007",
+        "run_name": "train_all_v008",
     },
 }
-VERSION = None  # bootstrap(version) đặt
 # Python của từng môi trường worker (environments/worker_envs.py in ra đường dẫn sau khi cài).
 ENVS = {}
 AVH_PYTHON = os.environ.get(
@@ -271,6 +276,7 @@ def config():
         "voices": TRAIN_VOICES + TEST_ONLY_VOICES,
     }
     cfg = {
+        "version": VERSION,
         "seed": 42,
         "seeds": SEEDS,
         "device": DEVICE,
@@ -363,6 +369,12 @@ def config():
             # Học video nén (cfg["variants"], v005): model không học nhất quán lấy bản nén
             # với xác suất này (mọi đặc trưng của mẫu cùng lấy từ bản nén); M3-R học theo cặp.
             "variant_p": 0.5,
+            # v006: chấm validation thêm tại các tỉ lệ epoch này (danh sách thứ k = epoch k; 0 = trước bước
+            # đầu). Chỉ để vẽ đường học (history["dense"], W&B dense/*), không chọn checkpoint / scheduler /
+            # dừng sớm, giữ nguyên RNG. Thử local (part 3): AUC AI? đi từ ~0,5 lên 0,9 trong ~300 bước đầu,
+            # trong khi epoch 1 của M3-R là 1.608 bước → epoch 1: 0, 1/32, 1/16, 1/8, 1/4, 1/2; epoch 2, 3: giữa
+            # epoch. Mỗi lần chấm ~9 phút với M3-R (3 mức) → +~1,2 giờ / model nặng.
+            "dense_val": [[0, 0.03125, 0.0625, 0.125, 0.25, 0.5], [0.5], [0.5]],
         },
         "bootstrap_replicates": 1000,
         # Nhãn mismatch (training/sync_labels.py, RESEARCH_WORKLOG/v004_model.md §5):
@@ -423,7 +435,7 @@ def config():
         "mouth": {"kind": "mouth", "crop": 96, "box_max_side": 640, "cpu_only": True},
         "lipinc": {"kind": "lipinc", "box_max_side": 640, "cpu_only": True},
         "wave": {"kind": "wave", "cpu_only": True},
-        # v007 (M7 ViSyl): PhoWhisper trên tiếng của mẫu → đơn vị âm tiết + thẻ (features/syllables.py).
+        # v008 (M7 ViSyl): PhoWhisper trên tiếng của mẫu → đơn vị âm tiết + thẻ (features/syllables.py).
         "syll": {"kind": "syll", "model": "vinai/PhoWhisper-small", "device": DEVICE},
     }
     # Tài sản dựng model: XLS-R gốc cho BL-A fine-tune; checkpoint AVH-Align công bố (train trên
@@ -437,7 +449,7 @@ def config():
         "avh_align_url": "https://raw.githubusercontent.com/bit-ml/AVH-Align/"
         "55401ded7d94a6ad59106c401696d89ce8d16faf/checkpoints/AVH-Align_AV1M.pt",
     }
-    if VERSION:
+    if VERSION in VERSIONS:
         version = VERSIONS[VERSION]
         cfg["models"] = version["models"] + version["ablations"]
         cfg["seeds"] = version["seeds"]
@@ -446,9 +458,10 @@ def config():
 
 
 def bootstrap(version=None):
-    """version: "v006" | "v007" cho script src/models/<version>/ (xem VERSIONS)."""
+    """version: "v007" | "v008" cho script src/models/<version>/ (xem VERSIONS)."""
     global VERSION
-    VERSION = version
+    if version:
+        VERSION = version
     sys.dont_write_bytecode = True
     os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
     sys.path[:0] = [str(ROOT / "src"), str(ROOT / "src/data/preparation")]

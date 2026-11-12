@@ -1,4 +1,4 @@
-"""v006 (M6 trihead_v3, P4, P6) và v007 (M7 ViSyl, thẻ âm tiết): kiểm thành phần mới."""
+"""v007 (M6 trihead_v3, P4, P6) và v008 (M7 ViSyl, thẻ âm tiết): kiểm thành phần mới."""
 
 import random
 
@@ -225,14 +225,14 @@ def test_p6_perfect_scorer_and_p4_reference_centering():
 def test_version_bootstrap_keeps_v005_training_protocol():
     import settings
 
-    base = settings.config()
+    base, old = settings.config(), settings.VERSION
     try:
-        settings.bootstrap("v007")
+        settings.bootstrap("v008")
         cfg = settings.config()
         assert cfg["models"][0] == "visyl" and cfg["seeds"] == [42, 43, 44, 45, 46]
-        assert cfg["runs"].endswith("train_all_v007")
+        assert cfg["runs"].endswith("train_all_v008") and cfg["version"] == "v008"
         for key in ("training", "mismatch_labels", "encoders", "variant_specs"):
             assert cfg[key] == base[key]  # cách train như v005 (gồm học bản nén)
     finally:
-        settings.VERSION = None
+        settings.VERSION = old
     assert settings.config()["models"] == settings.MODELS + settings.ABLATIONS

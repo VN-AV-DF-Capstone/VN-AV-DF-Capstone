@@ -4,7 +4,7 @@ Nhãn theo frame: visual / audio / mismatch = tỉ lệ frame nằm trong khoả
 label (bị AI), synthetic_visual, synthetic_audio, có mismatch.
 Đặc trưng (`needs`): av (AV-HuBERT a / v), ssl (XLS-R theo nhóm lớp [T, nhóm, 1024]), mouth (crop
 miệng + landmark môi + tư thế đầu), pose (chỉ landmark môi + tư thế đầu, không nạp crop), lipinc
-(8 crop màu LIPINC-V2, không theo frame), wave (tiếng 16 kHz [T, 640]), syll (v007 · M7: đơn vị âm tiết
+(8 crop màu LIPINC-V2, không theo frame), wave (tiếng 16 kHz [T, 640]), syll (v008 · M7: đơn vị âm tiết
 + thẻ theo frame [T, 7], features/syllables.py; lấy từ tiếng nên trượt / thay đoạn cùng tiếng).
 Augment độ lệch tiếng-hình (chỉ khi train): dịch đặc trưng tiếng (AV-HuBERT audio, XLS-R) so với
 hình k frame, k ngẫu nhiên đều trong cfg["training"]["audio_lag_aug"] (mặc định −1…+2; dương =
@@ -112,8 +112,8 @@ def replace_audio(item, other, targets, rng):
     start = rng.randint(margin, n - margin - size)
     source = min(start, m - size)
     if "syll" in other and rng.random() < 0.5:
-        # v007 (M7): một nửa số lần hai mép đoạn đúng biên âm tiết của clip nguồn (đưa "ghép theo biên
-        # từ, không AI" vào train, docs/v007_sau-review.md §2.7).
+        # v008 (M7): một nửa số lần hai mép đoạn đúng biên âm tiết của clip nguồn (đưa "ghép theo biên
+        # từ, không AI" vào train, docs/v008_sau-review.md §2.7).
         edges = np.flatnonzero(other["syll"][:, 0] > 0)
         edges = edges[(edges >= margin) & (edges <= min(n, m) - margin)]
         pairs = [(a, b) for a in edges for b in edges if low <= b - a <= high]
@@ -194,7 +194,7 @@ ENCODERS_FOR_NEED = {
     "wave": ("wave",),
     # M3: ngữ điệu (từ tiếng 16 kHz) + đầu / lông mày (landmark của cache AV-HuBERT, tư thế đầu).
     "prosody": ("avhubert", "mouth", "wave"),
-    "syll": ("syll",),  # v007 (M7): đơn vị âm tiết + thẻ (features/syllables.py)
+    "syll": ("syll",),  # v008 (M7): đơn vị âm tiết + thẻ (features/syllables.py)
     # v005: vùng tham chiếu cùng khung (giữa hai mắt / gốc mũi, cùng cạnh hộp miệng) cho trace tương đối.
     "ref": ("avhubert", "mouth", "ref"),
 }

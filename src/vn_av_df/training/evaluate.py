@@ -21,7 +21,7 @@ Báo cáo:
 - BL-Ens (không train): max(BL-V, BL-A) sau khi chuẩn hoá điểm mỗi model theo clip real validation
   (z-score), cho tác vụ ai; visual = BL-V, audio = BL-A. Model chỉ có điểm video (frame_level =
   False, LIPINC-V2) không có phép đo định vị.
-- v006 · M6 (đề xuất của MN, áp cho mọi model, để so cùng hậu xử lý): P4 `postprocess_p4` = AI?
+- v007 · M6 (đề xuất của MN, áp cho mọi model, để so cùng hậu xử lý): P4 `postprocess_p4` = AI?
   max(z_visual, z_audio) sau chuẩn hoá theo real val và 3 clip tham chiếu; P6 `localization_p6` =
   định vị theo ngưỡng cố định
   chọn trên val, AP trên partial + real theo tầng (đoạn ngẫu nhiên / theo biên từ / ≤ 0,6 s).
@@ -594,7 +594,7 @@ def shift_robustness(model, cfg, val_rows, test_rows, device, val_pred, test_pre
     return out
 
 
-# ---------------------------------------------------------------- v006 · M6: P4, P6 (dùng chung mọi model)
+# ---------------------------------------------------------------- v007 · M6: P4, P6 (dùng chung mọi model)
 def logit(p):
     p = np.clip(np.asarray(p, float), 1e-6, 1 - 1e-6)
     return np.log(p / (1 - p))
@@ -624,7 +624,7 @@ def p4_scores(rows, scores, stats, count):
 
 
 def p4_metrics(cfg, val_rows, test_rows, val_all, test_all, seen):
-    """M6 · P4 (docs/v006-v007_de-xuat-detector.md §2.3): AI? = max(z_visual, z_audio) sau chuẩn hoá
+    """M6 · P4 (docs/v007-v008_de-xuat-detector.md §2.3): AI? = max(z_visual, z_audio) sau chuẩn hoá
     theo real val và 3 clip tham chiếu cùng người; so với điểm thô trên đúng tập còn lại."""
     if not all({"visual", "audio", "ai"} <= set(s) for s in (val_all, test_all)):
         return None

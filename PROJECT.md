@@ -12,7 +12,8 @@ Cập nhật 27/10/2026. Repo chính chuyển sang code **v003** thống nhất 
 | v003 | từ 18/10/2026 | Dữ liệu real mới, sáu ô, 6 generator + 7 nguồn giọng AI, baseline + M1 / M2 | `src/data/`, `src/generators/`, `src/models/v003/`, `src/vn_av_df/` |
 | v004 | 03/11 - 07/11/2026 (code của Linh, `linhxm/vn-av-df-forensics` @ `36942ca`) | Nhãn mismatch đo được (AV-HuBERT + SyncNet), M3 `trihead_v4` (môi–tiếng–đầu, ngữ điệu), BL-A2 `xlsr_frozen`, train mỗi bước một model, chọn checkpoint theo val AUC | `src/models/v004/`, `src/vn_av_df/` |
 | v005 | từ 11/11/2026 (code của Linh, `linhxm/vn-av-df-forensics` @ `a1d0dd2`) | M3-R `trihead_v5`: học thêm video nén 480p / 360p, cổng độ phân giải; đã train trên Kaggle (3 part, seed 42): AI? 0,973 / 0,962 / 0,914 (sạch / 480p / 360p), [báo cáo](docs/v005_report.md); v004 đóng 07/11, [báo cáo](docs/v004_report.md) | `src/models/v005/`, `src/vn_av_df/` |
-| v006, v007 | đề xuất của MN, chưa train (trước 11/11 tên v005 · M5, v006 · M6) | M6 = nền M3-R + P4, P5, P6 (P5 chưa làm); M7 `visyl` (theo âm tiết tiếng Việt) | `src/models/v006/`, `src/models/v007/`, [docs](docs/v006-v007_de-xuat-detector.md) |
+| v006 | từ 12/11/2026 (code của Linh, `linhxm/vn-av-df-forensics` @ `dadda36`) | Đội hình v005 train lại với seed 43, đo dày validation trong 3 epoch đầu; Linh đang train trên Kaggle, chưa có kết quả | `src/models/v006/`, `src/vn_av_df/` |
+| v007, v008 | đề xuất của MN, chưa train (trước 12/11 là v006, v007; trước 11/11 là v005 · M5, v006 · M6) | M6 = nền M3-R + P4, P5, P6 (P5 chưa làm); M7 `visyl` (theo âm tiết tiếng Việt) | `src/models/v007/`, `src/models/v008/`, [docs](docs/v007-v008_de-xuat-detector.md) |
 
 Model của pre-v003 (y_001, align_002, peak_sync_001) không đưa sang v003: baseline v003 đã có detector cùng loại (BL-M `avh_align`, BL-M/sup `avh_align_sup`) và điểm khớp không cần train (`speechforensics`, dùng trong demo khi chưa có checkpoint).
 
