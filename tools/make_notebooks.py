@@ -63,7 +63,10 @@ sys.path.insert(0, str(ROOT))
 logged("pip-install", [sys.executable, "-m", "pip", "install", "-e", str(ROOT / "src/data/preparation"),
                         "-e", str(ROOT) + "[EXTRA]"])
 import settings
-settings.bootstrap()
+# Phiên bản: "v006" (Linh: đội hình v005, seed 43); đề xuất của MN: "v007" (M6), "v008" (M7 ViSyl).
+# v007 / v008 đổi đội hình, thư mục run, bước / phiên train và project W&B (settings.VERSIONS).
+VERSION = "v006"
+settings.bootstrap(VERSION)
 """
 
 
@@ -75,7 +78,7 @@ WANDB_CELL = """
 # W&B: log quá trình (setup từng phiên, trích feature, nhãn, train, test, báo cáo) làm bằng chứng.
 # Project PRIVATE. Thêm secret WANDB_API_KEY: Add-ons → Secrets. Không đẩy ảnh / video người thật.
 USE_WANDB = True
-WANDB_PROJECT = "vn-av-df-v006"  # v005: "vn-av-df-v005", v004: "vn-av-df-v004" (giữ nguyên, không ghi chồng)
+WANDB_PROJECT = f"vn-av-df-{settings.VERSION}"  # vn-av-df-v006 / -v007 / -v008; v005, v004 giữ nguyên, không ghi chồng
 WANDB_ENTITY = "vn-av-df-capstone"  # team trong org vn-av-df-capstone-org; key tạo trong org đó
 if USE_WANDB:
     from kaggle_secrets import UserSecretsClient
@@ -258,6 +261,9 @@ Mỗi part (`PART` = 1, 2, 3) chạy **ba phiên** bản gốc (+ 2 phiên cho m
    - `SESSION = "pr"`: real / sham / voice qua xử lý lành tính giống đường ống generator (x264 CRF 8 → codec / co giãn → x264 CRF 18, tiếng giữ nguyên, nhãn giữ nguyên); train / validation 4 họ xử lý, test một nửa họ đã thấy + một nửa 3 họ chưa thấy (`clips/reencode.json` → `chains`). Âm khó khi train + phép thử "AI thật hay vết đường ống".
    - `SESSION = "w360"` (VP9 360p + Opus), `"c288"` (288p): chỉ mẫu test, mức không có khi train (ngắn).
    Clip nén nằm lại Output phiên `-cpu` (nhẹ); dở giữa chừng thì phiên sau (`PREVIOUS_CACHE`) không làm lại mẫu đã có.
+4. v008 (M7 ViSyl, `VERSION = "v008"`): chỉ thêm cache `syll` (PhoWhisper trên tiếng của từng mẫu → đơn vị âm tiết + thẻ); `avhubert`, `xlsr`, `landmarks` dùng lại Output của Linh. Mỗi part **ba phiên** T4 ×2:
+   - `SESSION = "syll"`: bản gốc, không cần `OTHER_CACHES`.
+   - `SESSION = "c480-syll"`, `"c360-syll"`: attach Output `<biến thể>-cpu` cùng part vào `OTHER_CACHES` (dùng lại clip đã nén, ASR chạy trên tiếng đã nén).
 
 Hết giờ giữa chừng: chạy lại cùng `SESSION`, attach Output phiên dở vào `PREVIOUS_CACHE`. Cell "Log setup" ghi cách cài phiên vào `cache/vn-av-df-data/setup/`; run W&B `prepare` của phiên đính kèm luôn (config `setup`, bảng `setup/*`, artifact `setup-log`).
 """,
@@ -269,6 +275,7 @@ Hết giờ giữa chừng: chạy lại cùng `SESSION`, attach Output phiên d
             """
 PART = 1               # 1, 2, 3
 SESSION = "landmarks"  # "landmarks" (CPU) → song song "cpu" (CPU), "gpu" (T4 ×2), "<biến thể>-cpu" (CPU) → "<biến thể>" (T4 ×2)
+                       # v008: "syll", "<biến thể>-syll" (T4 ×2)
 # Slug dataset Kaggle của từng part (bản có sync_syncnet.json); sửa nếu upload tên khác.
 DATASETS = {1: "linhxm/vn-av-df-data-part1-trim04-fake",
             2: "linhxm/vn-av-df-data-part2-fake",
@@ -278,6 +285,7 @@ DATASET_PARTS = [Path(f"/kaggle/input/datasets/{DATASETS[PART]}")]
 PREVIOUS_CACHE = None  # Path("/kaggle/input/<Output phiên dở>/vn-av-df-forensics/cache/vn-av-df-data")
 # Phiên "cpu" / "gpu" / "<biến thể>-cpu": Output phiên "landmarks" CỦA CÙNG PART (đường dẫn ở panel Input);
 # phiên "<biến thể>" (GPU): thêm Output phiên "<biến thể>-cpu" cùng part (dùng lại clip đã nén).
+# v008: "syll" không cần; "<biến thể>-syll" chỉ cần Output "<biến thể>-cpu" cùng part.
 OTHER_CACHES = []      # vd. [Path("/kaggle/input/notebooks/linhxm/vn-av-df-prepare-p1-landmarks/vn-av-df-forensics/cache/vn-av-df-data")]
 SESSION_NAME = f"prepare-p{PART}-{SESSION}"
 SMOKE = False          # thử luồng: chỉ 2 người mỗi split, không W&B (Output không dùng để train; xong thì đặt lại False)
@@ -297,18 +305,22 @@ CHOOSE = {
     # Một phiên làm cả 3 encoder ~2,9 MB / mẫu × ~7.700 mẫu ≈ 22 GB / part, vượt Output 20 GB (đo 09/11).
     **{f"{v}-cpu": (lambda e: e == "mouth") for v in settings.VARIANTS},
     **{v: (lambda e: e in ("avhubert", "xlsr")) for v in settings.VARIANTS},
+    # v008 (M7): chỉ cache syll (PhoWhisper, GPU), bản gốc và từng biến thể; encoder khác dùng lại của Linh.
+    "syll": lambda e: e == "syll",
+    **{f"{v}-syll": (lambda e: e == "syll") for v in settings.VARIANTS},
 }
 ENCODERS = [e for e in encoders_for(MODELS) if CHOOSE[SESSION](e)]  # hoặc chọn tay
-VARIANT = SESSION.removesuffix("-cpu")
+VARIANT = SESSION.removesuffix("-cpu").removesuffix("-syll")
+GPU_SESSION = SESSION in ("gpu", "syll") or SESSION.endswith("-syll") or SESSION in settings.VARIANTS
 if VARIANT in settings.VARIANTS:
     cfg["variant"] = dict(settings.VARIANTS[VARIANT])
-if (SESSION == "gpu" or SESSION in settings.VARIANTS) and not GPU:
+if GPU_SESSION and not GPU:
     raise RuntimeError(f'SESSION = "{SESSION}" cần Accelerator GPU (T4 ×2)')
-if SESSION in settings.VARIANTS and not any((Path(c) / "clips").is_dir() for c in OTHER_CACHES):
-    print(f'CẢNH BÁO: chưa attach Output phiên "{SESSION}-cpu" vào OTHER_CACHES, phiên GPU sẽ tự nén clip (tốn quota)')
+if VARIANT in settings.VARIANTS and GPU_SESSION and not any((Path(c) / "clips").is_dir() for c in OTHER_CACHES):
+    print(f'CẢNH BÁO: chưa attach Output phiên "{VARIANT}-cpu" vào OTHER_CACHES, phiên GPU sẽ tự nén clip (tốn quota)')
 if (SESSION in ("landmarks", "cpu") or SESSION.endswith("-cpu")) and GPU:
     print(f"CẢNH BÁO: phiên {SESSION} chỉ cần CPU, chọn Accelerator None để không tốn quota GPU")
-if SESSION != "landmarks" and not OTHER_CACHES:
+if SESSION not in ("landmarks", "syll") and not OTHER_CACHES:
     print("CẢNH BÁO: OTHER_CACHES rỗng, worker sẽ tự dò landmark bằng dlib (chậm)")
 print("Phiên", SESSION_NAME, "→ ENCODERS =", ENCODERS)
 root, parts = part_selection(DATASET_PARTS)
@@ -359,7 +371,7 @@ from vn_av_df.training.prepare import prepare
 from vn_av_data.common.runtime import prune_output
 try:
     print(prepare(cfg, ENCODERS))
-    if SESSION in settings.VARIANTS:  # phiên GPU xong: bỏ clip nén tự làm khỏi Output (clip của "-cpu" giữ ở đó)
+    if VARIANT in settings.VARIANTS and GPU_SESSION:  # phiên GPU xong: bỏ clip nén tự làm khỏi Output (clip của "-cpu" giữ ở đó)
         clips = sorted((OUTPUT_CACHE / "clips").glob("*.mp4"))
         for clip in clips:
             clip.unlink()
@@ -378,6 +390,8 @@ train = nb(
             "markdown",
             """
 # v006 · Train từng model (nhiều hàng song song trên 2 GPU), rồi test một lần + báo cáo
+
+Chọn phiên bản ở cell đầu (`VERSION`): `"v006"` (Linh), `"v007"` (M6: chưa có bước train, chỉ `test` với `PREVIOUS_RUN` = Output train v005 của Linh), `"v008"` (M7 ViSyl: `P1` = `visyl` ‖ `visyl_uniform_no_phon`, `P2` = `visyl_no_phon` ‖ `visyl_shuffled_tags`, rồi `GROUP = "M7"` với `SEEDS = [43, 44]`, rồi `test`; cần thêm Output 9 phiên prepare `syll` của `KAGGLE_USER`). Thư mục run, project W&B và tên notebook đi theo `VERSION` (`vn-av-df-<VERSION>-<GROUP>`).
 
 v006 = đội hình v005 train lại trên **seed 43** (`SEEDS`), có **đo dày validation** ở 3 epoch đầu (`settings` → `training.dense_val`: thêm điểm AUC giữa epoch để thấy đường học đi lên từ 0,5; không dùng chọn checkpoint). v005 (seed 42) ở branch `v005`.
 
@@ -404,6 +418,8 @@ Cần: 3 dataset part (có `sync_syncnet.json`, chạy `src/models/v006/01a_sync
             "code",
             """
 GROUP = "labels"      # "labels" → "P1" → "P2" → ("P3") → "test"; tuỳ chọn "P4"-"P6"; hoặc một bước lẻ, vd. "M2"
+                      # v008: "P1" → "P2" → "M7" (SEEDS = [43, 44]) → "test"; v007: chỉ "test"
+KAGGLE_USER = "linhxm"  # tài khoản Kaggle chạy các phiên train (và prepare syll của v008); sửa thành của bạn
 DROP = []             # bước bỏ ở phiên này, vd. ["M3-abs"] (settings.TRAIN_GROUPS)
 DATASET_PARTS = [Path(f"/kaggle/input/datasets/linhxm/{s}") for s in (
     "vn-av-df-data-part1-trim04-fake", "vn-av-df-data-part2-fake", "vn-av-df-data-part3-fake")]
@@ -413,11 +429,19 @@ CACHES = [Path(PREPARE.format(p, s)) for p in (1, 2, 3) for s in ("landmarks", "
 # Biến thể (settings.VARIANTS, phiên prepare cùng tên của 3 part): train học biến thể "train" + test thêm trên mọi biến thể.
 # Mỗi biến thể 2 phiên mỗi part: "<v>-cpu" (clip nén + mouth) và "<v>" (avhubert + xlsr).
 VARIANT_CACHES = {v: [Path(PREPARE.format(p, s)) for p in (1, 2, 3) for s in (v, f"{v}-cpu")] for v in settings.VARIANTS}
-# Output các phiên train v006: notebook vn-av-df-v006-<phiên> (v005: vn-av-df-train-<phiên>, runs/train_all_v005).
-RUNS = "/kaggle/input/notebooks/linhxm/vn-av-df-v006-{}/vn-av-df-forensics/runs/" + settings.RUN_NAME
+# v008 (M7): thêm cache syll, Output phiên prepare "syll" / "<biến thể>-syll" của KAGGLE_USER.
+from vn_av_df.training.prepare import encoders_for
+if "syll" in encoders_for(settings.TEST_MODELS):
+    MY_PREPARE = "/kaggle/input/notebooks/" + KAGGLE_USER + "/vn-av-df-prepare-p{}-{}/vn-av-df-forensics/cache/vn-av-df-data"
+    CACHES += [Path(MY_PREPARE.format(p, "syll")) for p in (1, 2, 3)]
+    for v in VARIANT_CACHES:
+        VARIANT_CACHES[v] += [Path(MY_PREPARE.format(p, f"{v}-syll")) for p in (1, 2, 3)]
+# Output các phiên train: notebook vn-av-df-<VERSION>-<phiên> (v005: vn-av-df-train-<phiên>, runs/train_all_v005).
+RUNS = f"/kaggle/input/notebooks/{KAGGLE_USER}/vn-av-df-{settings.VERSION}-{{}}/vn-av-df-forensics/runs/" + settings.RUN_NAME
 PREVIOUS_RUN = []     # P2: [Path(RUNS.format("p1"))]; P3: [Path(RUNS.format("p2"))] (Output P2 đã gộp P1); bước lẻ: Output phiên gần nhất  (slug viết thường)
                       # test / report: Output phiên train cuối (đã gộp các phiên trước), vd. [Path(RUNS.format("p3"))]
-SEEDS = list(settings.SEEDS)  # v006: [43] (v005: [42])
+                      # v007 test: Output train v005 cuối của Linh (thư mục runs/train_all_v005; chỉ M3-R được chấm)
+SEEDS = list(settings.SEEDS)  # v006: [43] (v005: [42]); v008: [42], bậc 3 GROUP "M7": [43, 44]; test: [42, 43, 44]
 MAX_HOURS = 11.5      # tính từ đầu phiên (SESSION_START); dừng sạch (lưu last.pt) trước giới hạn 12 giờ của
                       # Kaggle, chừa ~30 phút cho phần sau train (W&B, Output)
 STAGE_LOCAL = True    # chép cache cần sang /kaggle/temp trước khi train / test (nhanh hơn nhiều lần; thiếu chỗ thì tự bỏ)

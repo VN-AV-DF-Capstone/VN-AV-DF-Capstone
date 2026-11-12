@@ -234,26 +234,62 @@ TRAIN_SESSIONS = {
 # model thì bỏ qua).
 TEST_MODELS = MODELS + ABLATIONS
 # v007 · M6 và v008 · M7 (đề xuất của MN; docs/v007-v008_de-xuat-detector.md, docs/v008_sau-review.md):
-# chưa train. Script src/models/v007|v008 gọi bootstrap("v007" | "v008"): chỉ đổi đội
-# hình, seed và thư mục run; cách train như v005 của Linh (nhãn mismatch `mismatch_labels`, dịch
-# tiếng −2…+5, học thêm bản nén c480 / c360 với xác suất `variant_p`, chọn checkpoint theo val AUC
-# trung bình bản sạch + bản nén, plateau, XLS-R 5 nhóm lớp) để so được với M3-R của v005.
+# chưa train. Script src/models/v007|v008 và notebook (VERSION = "v007" | "v008") gọi bootstrap(version):
+# chỉ thay các biến đội hình dưới đây (thư mục run, model, seed, bước / phiên train); cách train như v005
+# của Linh (nhãn mismatch `mismatch_labels`, dịch tiếng −2…+5, học thêm bản nén c480 / c360 với xác suất
+# `variant_p`, chọn checkpoint theo val AUC trung bình bản sạch + bản nén, plateau, XLS-R 5 nhóm lớp,
+# đo dày validation như v006) để so được với M3-R.
 VERSIONS = {
     # M6 (MN chốt 11/11): nền M3-R (trihead_v5) + P4, P5, P6. P1-P3 (trihead_v3, code giữ trong
     # models.SPECS) bỏ khỏi đội hình: ablation v004 / v005 của Linh đã trả lời. P4, P6 ở evaluate
-    # (mọi model); P5 (front-end giọng) chưa có encoder. Nấc 0 không cần train: chép run M3-R v005
-    # vào runs/train_all_v007/ rồi chạy src/models/v007/03_evaluate.py.
+    # (mọi model); P5 (front-end giọng) chưa có encoder nên chưa có bước train. Nấc 0 không cần train:
+    # GROUP = "test" với PREVIOUS_RUN = Output train v005 của Linh (M3-R seed 42).
     "v007": {
-        "models": ["trihead_v5"],
-        "ablations": [],
-        "seeds": [42],
-        "run_name": "train_all_v007",
+        "RUN_NAME": "train_all_v007",
+        "MODELS": ["trihead_v5"],
+        "ABLATIONS": [],
+        "SEEDS": [42],
+        "TRAIN_GROUPS": {},
+        "TRAIN_SESSIONS": {},
     },
+    # M7 theo bậc (plan 12/11): P1 = bậc 1, P2 = bậc 2 (chỉ khi bậc 1 đạt trên val); bậc 3 thêm seed cho
+    # visyl: GROUP = "M7" với SEEDS = [43, 44] ở notebook. Giờ ○ (chưa đo; gần M2 5,5 và BL-A2 4,2 giờ).
     "v008": {
-        "models": ["visyl"],
-        "ablations": ["visyl_no_phon", "visyl_uniform_no_phon", "visyl_shuffled_tags"],
-        "seeds": [42, 43, 44, 45, 46],
-        "run_name": "train_all_v008",
+        "RUN_NAME": "train_all_v008",
+        "MODELS": ["visyl"],
+        "ABLATIONS": ["visyl_no_phon", "visyl_uniform_no_phon", "visyl_shuffled_tags"],
+        "SEEDS": [42],
+        "TRAIN_GROUPS": {
+            "M7": {
+                "title": "M7 ViSyl (+ benchmark 4 cấu hình M7)",
+                "lanes": [["visyl"]],
+                "benchmark": True,
+                "hours": [4, 8],
+                "tier": "core",
+            },
+            "M7-uniform": {
+                "title": "M7 cửa sổ đều, không thẻ (đơn vị âm tiết có giúp không)",
+                "lanes": [["visyl_uniform_no_phon"]],
+                "hours": [4, 8],
+                "tier": "core",
+            },
+            "M7-nophon": {
+                "title": "M7 không thẻ khẩu hình",
+                "lanes": [["visyl_no_phon"]],
+                "hours": [4, 8],
+                "tier": "core",
+            },
+            "M7-shuffled": {
+                "title": "M7 thẻ khẩu hình xáo trộn",
+                "lanes": [["visyl_shuffled_tags"]],
+                "hours": [4, 8],
+                "tier": "core",
+            },
+        },
+        "TRAIN_SESSIONS": {
+            "P1": [["M7"], ["M7-uniform"]],
+            "P2": [["M7-nophon"], ["M7-shuffled"]],
+        },
     },
 }
 # Python của từng môi trường worker (environments/worker_envs.py in ra đường dẫn sau khi cài).
@@ -449,19 +485,17 @@ def config():
         "avh_align_url": "https://raw.githubusercontent.com/bit-ml/AVH-Align/"
         "55401ded7d94a6ad59106c401696d89ce8d16faf/checkpoints/AVH-Align_AV1M.pt",
     }
-    if VERSION in VERSIONS:
-        version = VERSIONS[VERSION]
-        cfg["models"] = version["models"] + version["ablations"]
-        cfg["seeds"] = version["seeds"]
-        cfg["runs"] = str(ROOT / "runs" / version["run_name"])
     return cfg
 
 
 def bootstrap(version=None):
-    """version: "v007" | "v008" cho script src/models/<version>/ (xem VERSIONS)."""
-    global VERSION
+    """version: "v007" | "v008" (VERSIONS) cho script src/models/<version>/ và notebook; bỏ trống = v006."""
+    global VERSION, TEST_MODELS
     if version:
         VERSION = version
+    if VERSION in VERSIONS:
+        globals().update(VERSIONS[VERSION])
+        TEST_MODELS = MODELS + ABLATIONS
     sys.dont_write_bytecode = True
     os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
     sys.path[:0] = [str(ROOT / "src"), str(ROOT / "src/data/preparation")]
