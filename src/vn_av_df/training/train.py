@@ -5,7 +5,11 @@
   lr, batch, epoch, scheduler của code gốc); cfg["training"]["max_epochs"] (nếu có) chặn trên số
   epoch (dùng cho test nhanh).
 - Model `real_only` (avh_align) chỉ dùng clip real của train / validation.
-- Chọn checkpoint theo validation loss; early stopping `patience` epoch.
+- Chọn checkpoint và dừng sớm theo `monitor` (mặc định trung bình AUC validation của các tác vụ
+  model có đầu ra; model chỉ học real / validation thiếu lớp: val loss); scheduler plateau
+  bước theo cùng thước đó; early stopping `patience` epoch.
+- Mỗi run ghi `architecture.json` / `architecture.txt` (lớp, tham số theo khối, đầu vào, công
+  thức train); run W&B đính kèm setup của phiên đã train nó (setup_log.py).
 - Train tiếp được giữa chừng: sau mỗi epoch ghi `last.pt` (model, optimizer, scheduler, AMP scaler,
   lịch sử, trạng thái ngẫu nhiên); chạy lại thì tiếp từ epoch sau đó, xong thì xoá `last.pt`.
 - Nguồn gốc lần train ghi ở `runs/<RUN>/provenance.json` (dữ liệu, chữ ký cache, commit code, tài
@@ -39,6 +43,9 @@ from vn_av_df.training.data import (
 )
 from vn_av_df.training.models import build
 
+# Số điểm loss train mỗi epoch trên W&B (trục train/steps); AUC validation vẫn một điểm mỗi epoch.
+STEP_POINTS = 50
+
 
 def feature_dim(cfg, rows):
     for row in rows:
@@ -49,7 +56,21 @@ def feature_dim(cfg, rows):
     return 1024
 
 
+def ssl_groups(cfg, rows):
+    """Số nhóm lớp XLS-R trong cache (v003: 3; v004: theo encoders.xlsr.layer_groups)."""
+    for row in rows:
+        path = cache_file(cfg, "xlsr", row["sample_id"])
+        if path.is_file():
+            with np.load(path, allow_pickle=False) as z:
+                return int(z["ssl"].shape[1]) if z["ssl"].ndim == 3 else 1
+    return len((cfg.get("encoders") or {}).get("xlsr", {}).get("layer_groups") or [0, 0, 0])
+
+
 def pos_weights(rows):
+    """Tỉ lệ âm / dương theo video (kẹp 0,2-5). Mismatch: dùng nhãn v004 tại độ trượt 0 khi có
+    (`_mismatch_eval`), bỏ mẫu không xác định (mask)."""
+    from vn_av_df.training.evaluate import target
+
     out = {}
     for task, key in (
         ("ai", "label"),
@@ -58,7 +79,8 @@ def pos_weights(rows):
     ):
         counts = Counter(bool(r.get(key)) for r in rows)
         out[task] = min(5.0, max(0.2, counts[False] / max(1, counts[True])))
-    counts = Counter(bool(r.get("av_mismatch_intervals")) for r in rows)
+    labels = [target(r, "mismatch") for r in rows]
+    counts = Counter(bool(x) for x in labels if x is not None)
     out["mismatch"] = min(5.0, max(0.2, counts[False] / max(1, counts[True])))
     return out
 
@@ -101,8 +123,34 @@ def recipe(cfg, model):
     return options
 
 
+def variant_names(cfg, train=False, labelled=False):
+    """Biến thể có cache (cfg["variants"]) theo đặc tả cfg["variant_specs"]: train=True → biến thể
+    học khi train ("train": True); labelled=True → biến thể có đủ nhãn ở validation (mức nén; không
+    PR vì chỉ có real / sham / voice, không mức chỉ test) để chọn checkpoint."""
+    specs = cfg.get("variant_specs") or {}
+    names = []
+    for name in cfg.get("variants") or {}:
+        spec = specs.get(name, {})
+        if train and not spec.get("train", True):
+            continue
+        if labelled and (
+            spec.get("kind") == "processed_real"
+            or "validation" not in spec.get("splits", ["validation"])
+        ):
+            continue
+        names.append(name)
+    return names
+
+
 def loaders(cfg, model, rows, seed, train, options=None, speakers=None):
     options = options or recipe(cfg, model)
+    # Biến thể (cfg["variants"], v005): train lấy bản nén / PR với xác suất variant_p, hoặc
+    # theo cặp sạch + bản biến thể khi model học nhất quán (batch giữ cùng số mẫu: B/2 cặp).
+    learn = variant_names(cfg, train=True)
+    variants = None
+    if train and getattr(model, "train_variants", True) and learn:
+        variants = {n: cfg["variants"][n] for n in learn}
+    pair = bool(variants) and getattr(model, "consistency", 0) > 0
     data = BenchData(
         cfg,
         rows,
@@ -116,6 +164,9 @@ def loaders(cfg, model, rows, seed, train, options=None, speakers=None):
         pseudo_fake=model.pseudo_fake if train else 0.0,
         rawboost=train and model.rawboost,
         speakers=speakers,
+        variants=variants,
+        variant_p=float(options.get("variant_p", 0.0)) if variants else 0.0,
+        pair=pair,
     )
     generator = torch.Generator().manual_seed(seed)
     weights = speaker_weights(data.rows) if train and options.get("speaker_balance") else None
@@ -126,7 +177,7 @@ def loaders(cfg, model, rows, seed, train, options=None, speakers=None):
     )
     return data, torch.utils.data.DataLoader(
         data,
-        batch_size=options["batch_size"],
+        batch_size=max(1, options["batch_size"] // 2) if pair else options["batch_size"],
         shuffle=train and sampler is None,
         sampler=sampler,
         collate_fn=collate,
@@ -136,12 +187,25 @@ def loaders(cfg, model, rows, seed, train, options=None, speakers=None):
 
 
 def run_epoch(
-    model, loader, optimizer, device, weights, stats=None, clip=5.0, scaler=None, label=None
+    model,
+    loader,
+    optimizer,
+    device,
+    weights,
+    stats=None,
+    clip=5.0,
+    scaler=None,
+    label=None,
+    step_log=None,
 ):
     """Loss trung bình; `stats` (dict) nhận thêm trung bình từng thành phần loss + grad norm.
-    `label`: in tiến độ theo batch (batch đầu, rồi mỗi 60 s) kèm loss trung bình tới lúc đó."""
-    total, count = 0.0, 0
+    `label`: in tiến độ theo batch (batch đầu, rồi mỗi 60 s) kèm loss trung bình tới lúc đó.
+    `step_log` (train): {"run", "steps", "samples", "epoch", "every"}: mỗi `every` bước ghi W&B loss trung
+    bình của cửa sổ đó theo trục train/steps cộng dồn (bước / mẫu trước epoch này = "steps" / "samples").
+    Loss, grad norm đã đọc về CPU mỗi batch, nên chỉ thêm một lệnh log (W&B gửi ở tiến trình nền)."""
+    total, count, steps = 0.0, 0, 0
     parts, norms, skipped = Counter(), [], 0
+    window, window_parts, window_norms = [0.0, 0], Counter(), []
     model.train(optimizer is not None)
     amp = scaler is not None and str(device).startswith("cuda")
     progress = (
@@ -167,6 +231,7 @@ def run_epoch(
             # qua bước đó. Chỉ lấy trung bình norm hữu hạn, đếm riêng số bước tràn (BL-A, 25/10).
             if math.isfinite(norm):
                 norms.append(norm)
+                window_norms.append(norm)
             else:
                 skipped += 1
             if amp:
@@ -174,11 +239,30 @@ def run_epoch(
                 scaler.update()
             else:
                 optimizer.step()
+            steps += 1
         size = len(batch["index"])
-        total += float(loss.detach()) * size
+        batch_loss = float(loss.detach())
+        total += batch_loss * size
         count += size
         for key, value in (getattr(model, "loss_parts", None) or {}).items():
             parts[key] += value * size
+            window_parts[key] += value * size
+        window[0] += batch_loss * size
+        window[1] += size
+        if step_log and steps and steps % step_log["every"] == 0 and window[1]:
+            n = window[1]
+            step_log["run"].log(
+                {
+                    "train/steps": step_log["steps"] + steps,
+                    "train/samples": step_log["samples"] + count,
+                    "step/epoch": step_log["epoch"] - 1 + steps / max(1, len(loader)),
+                    "step/loss": window[0] / n,
+                    **{f"step/{k}": v / n for k, v in window_parts.items()},
+                    "step/grad_norm": float(np.mean(window_norms)) if window_norms else None,
+                    "step/lr": optimizer.param_groups[0]["lr"],
+                }
+            )
+            window, window_parts, window_norms = [0.0, 0], Counter(), []
         if progress:
             progress.step(note=f"loss {total / max(1, count):.4f}")
     if stats is not None:
@@ -187,6 +271,9 @@ def run_epoch(
             stats["grad_norm"] = float(np.mean(norms))
         if skipped:
             stats["grad_nonfinite_steps"] = skipped
+        if optimizer is not None:
+            # Trục so được với đường học theo step (harness local, paper): không đưa vào loss_train/.
+            stats["steps"], stats["samples"] = steps, count
     return total / max(1, count)
 
 
@@ -202,9 +289,61 @@ def validation_metrics(model, cfg, rows, device):
         if any(v is None for v in scores.values()):
             continue
         scores_by_task[task] = scores
+        known = [r for r in rows if target(r, task) is not None]  # v004: bỏ mismatch mask
         out[f"val_auc/{task}"] = auc(
-            [target(r, task) for r in rows], [scores[r["sample_id"]] for r in rows]
+            [target(r, task) for r in known], [scores[r["sample_id"]] for r in known]
         )
+    # Biến thể nén: AUC validation từng mức; thước chọn checkpoint val_auc/<tác vụ> = trung bình
+    # bản sạch và các mức nén có đủ nhãn (model tốt ở cả hai, không chỉ ở video sạch).
+    labelled = variant_names(cfg, labelled=True)
+    if labelled:
+        from vn_av_df.training.evaluate import variant_rows
+
+        for name in labelled:
+            v_rows = variant_rows(cfg, rows, model.needs, name)
+            if not v_rows:
+                continue
+            v_pred = predict(model, cfg, v_rows, device, variant=name)
+            for task in list(scores_by_task):
+                scores = {s: task_scores(model, p).get(task) for s, p in v_pred.items()}
+                known = [r for r in v_rows if target(r, task) is not None]
+                value = auc(
+                    [target(r, task) for r in known], [scores[r["sample_id"]] for r in known]
+                )
+                out[f"val_auc_{name}/{task}"] = value
+        for task in list(scores_by_task):
+            values = [out[f"val_auc/{task}"]] + [
+                out[f"val_auc_{n}/{task}"] for n in labelled if f"val_auc_{n}/{task}" in out
+            ]
+            out[f"val_auc_clean/{task}"] = out[f"val_auc/{task}"]
+            if all(v is not None for v in values):
+                out[f"val_auc/{task}"] = float(np.mean(values))
+    # Biến thể PR (chỉ đo, không chọn checkpoint): AUC "khớp đường ống" trên validation = lip-sync bản
+    # sạch so với real / sham / voice đã qua xử lý lành tính (visual; AI? chỉ real + sham là âm).
+    specs = cfg.get("variant_specs") or {}
+    for name in [
+        n for n in cfg.get("variants") or {} if specs.get(n, {}).get("kind") == "processed_real"
+    ]:
+        from vn_av_df.training.evaluate import PIPELINE_NEGATIVE_CELLS, variant_rows
+
+        pr_rows = variant_rows(
+            cfg, [r for r in rows if r.get("cell") in ("real", "sham", "voice")], model.needs, name
+        )
+        if not pr_rows:
+            continue
+        pr_pred = predict(model, cfg, pr_rows, device, variant=name)
+        positives = [r["sample_id"] for r in rows if r.get("synthetic_visual")]
+        for task, cells in PIPELINE_NEGATIVE_CELLS.items():
+            if task not in scores_by_task:
+                continue
+            neg = [
+                task_scores(model, pr_pred[r["sample_id"]]).get(task)
+                for r in pr_rows
+                if r.get("cell") in cells
+            ]
+            pos = [scores_by_task[task][s] for s in positives]
+            if neg and pos and None not in neg:
+                out[f"val_pipeline_{name}/{task}"] = auc([1] * len(pos) + [0] * len(neg), pos + neg)
     ai = scores_by_task.get("ai")
     if ai:
         reals = [r for r in rows if r.get("cell") == "real"]
@@ -221,6 +360,77 @@ def validation_metrics(model, cfg, rows, device):
     return out
 
 
+def monitor_spec(model, rows, options):
+    """(kiểu, tác vụ) của thước chọn checkpoint. "auc": tác vụ = các đầu ra của model, chỉ khi
+    validation có cả hai lớp ở mọi tác vụ đó; còn lại "loss" (avh_align chỉ có real)."""
+    from vn_av_df.training.evaluate import target
+
+    tasks = sorted(set(model.heads.values()))
+    if options.get("monitor", "loss") != "auc" or model.real_only or not tasks:
+        return "loss", []
+    for task in tasks:
+        labels = {int(bool(x)) for x in (target(r, task) for r in rows) if x is not None}
+        if labels != {0, 1}:
+            return "loss", []
+    return "auc", tasks
+
+
+def monitor_value(kind, tasks, val_loss, metrics):
+    if kind == "loss":
+        return val_loss
+    values = [metrics.get(f"val_auc/{t}") for t in tasks]
+    return None if any(v is None for v in values) else float(np.mean(values))
+
+
+def better(value, best, kind):
+    if value is None:
+        return False
+    if best is None:
+        return True
+    return value > best + 1e-4 if kind == "auc" else value < best - 1e-4
+
+
+def architecture(model, name, options, monitor):
+    """Mô tả kiến trúc của một run (W&B config + file trong thư mục run): người đọc log biết
+    model được dựng thế nào mà không cần mở code."""
+    from vn_av_df.training.models import SPECS
+
+    cls = type(model)
+    modules = []
+    for child, module in model.named_children():
+        params = list(module.parameters())
+        modules.append(
+            {
+                "module": child,
+                "type": type(module).__name__,
+                "parameters": sum(p.numel() for p in params),
+                "trainable": sum(p.numel() for p in params if p.requires_grad),
+            }
+        )
+    params = list(model.parameters())
+    return {
+        "name": name,
+        "class": f"{cls.__module__}.{cls.__name__}",
+        "spec": dict(SPECS[name][1]) if name in SPECS else {},
+        "doc": (cls.__doc__ or "").strip(),
+        "needs": sorted(model.needs),
+        "heads": dict(model.heads),
+        "pool": model.pool,
+        "references": model.references,
+        "crop_frames": model.crop_frames,
+        "pseudo_fake": model.pseudo_fake,
+        "real_only": model.real_only,
+        "augment_mouth": getattr(model, "augment", False),
+        "augment_lag": getattr(model, "lag_augment", False),
+        "recipe": "code gốc (train_options)" if model.train_options else "settings.training",
+        "parameters": sum(p.numel() for p in params),
+        "trainable": sum(p.numel() for p in params if p.requires_grad),
+        "modules": modules,
+        "training": options,
+        "monitor": {"kind": monitor[0], "tasks": monitor[1]},
+    }
+
+
 def train_one(cfg, name, seed, rows, out):
     out = Path(out)
     if (out / "best.pt").is_file() and (out / "history.json").is_file():
@@ -233,7 +443,11 @@ def train_one(cfg, name, seed, rows, out):
     device = cfg["device"] if torch.cuda.is_available() or cfg["device"] == "cpu" else "cpu"
     dim = feature_dim(cfg, rows)
     speakers = speaker_index(rows)
-    assets = {**(cfg.get("model_assets") or {}), "n_speakers": len(speakers)}
+    assets = {
+        **(cfg.get("model_assets") or {}),
+        "n_speakers": len(speakers),
+        "ssl_groups": ssl_groups(cfg, rows),
+    }
     base = cfg["training"]
     model = build(name, dim, base["hidden"], base["dropout"], assets=assets).to(device)
     options = recipe(cfg, model)
@@ -251,6 +465,10 @@ def train_one(cfg, name, seed, rows, out):
         val_rows = [r for r in val_rows if r["label"] == 0 and r.get("cell") == "real"]
     if hasattr(model, "balance"):
         model.balance(train_rows, options)
+    monitor = monitor_spec(model, val_rows, options)
+    arch = architecture(model, name, options, monitor)
+    write_json(out / "architecture.json", arch)
+    (out / "architecture.txt").write_text(str(model), encoding="utf-8")
     history = {
         "model": name,
         "seed": seed,
@@ -258,7 +476,9 @@ def train_one(cfg, name, seed, rows, out):
         "complete": False,
         "train_samples": len(train_rows),
         "val_samples": len(val_rows),
+        "monitor": {"kind": monitor[0], "tasks": monitor[1]},
     }
+    group_tag = cfg.get("train_group")
     run = tracking.open_run(
         cfg,
         "train",
@@ -277,9 +497,26 @@ def train_one(cfg, name, seed, rows, out):
             "augment_lag": getattr(model, "lag_augment", False),
             "train_samples": len(train_rows),
             "val_samples": len(val_rows),
+            "monitor": f"{monitor[0]}:{'+'.join(monitor[1])}" if monitor[1] else monitor[0],
+            "architecture": {k: v for k, v in arch.items() if k not in ("doc", "training")},
         },
         folder=out,
-        tags=[name],
+        tags=[name] + ([f"group:{group_tag}"] if group_tag else []),
+        with_setup=True,
+    )
+    run.step_axis(
+        "train/steps"
+    )  # đường học theo bước: điểm mỗi STEP_POINTS phần epoch + điểm cuối epoch
+    run.tables(
+        {
+            "architecture/modules": (
+                ["module", "type", "parameters", "trainable"],
+                [
+                    [m["module"], m["type"], m["parameters"], m["trainable"]]
+                    for m in arch["modules"]
+                ],
+            )
+        }
     )
     if not model.trainable:
         save(out / "best.pt", {"config": config, "state": model.state_dict(), "epoch": 0})
@@ -303,7 +540,10 @@ def train_one(cfg, name, seed, rows, out):
     )
     scheduler = (
         torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode="min", factor=0.1, patience=options.get("plateau_patience", 5)
+            optimizer,
+            mode="max" if monitor[0] == "auc" else "min",
+            factor=0.1,
+            patience=options.get("plateau_patience", 5),
         )
         if options.get("scheduler") == "plateau"
         else None
@@ -314,7 +554,8 @@ def train_one(cfg, name, seed, rows, out):
     best, patience, stop, start = None, 0, "max_epochs", 1
     resume = out / "last.pt"
     if resume.is_file():
-        state = torch.load(resume, map_location=device, weights_only=False)
+        # Nạp về CPU: trạng thái RNG phải là ByteTensor trên CPU; model, optimizer tự về đúng thiết bị.
+        state = torch.load(resume, map_location="cpu", weights_only=False)
         speed = ("workers", "eval_batch_size")  # chỉ ảnh hưởng tốc độ, đổi được khi chạy tiếp
         same = {k: v for k, v in options.items() if k not in speed} == {
             k: v for k, v in state["options"].items() if k not in speed
@@ -365,6 +606,13 @@ def train_one(cfg, name, seed, rows, out):
             clip,
             scaler,
             label=f"{tag} train",
+            step_log={
+                "run": run,
+                "steps": sum(e["train_parts"].get("steps", 0) for e in history["epochs"]),
+                "samples": sum(e["train_parts"].get("samples", 0) for e in history["epochs"]),
+                "epoch": epoch,
+                "every": max(1, len(train_loader) // STEP_POINTS),
+            },
         )
         val_loss = run_epoch(
             model, val_loader, None, device, weights, val_stats, label=f"{tag} val"
@@ -374,9 +622,10 @@ def train_one(cfg, name, seed, rows, out):
                 f"{tag}: loss không hữu hạn (train {train_loss}, val {val_loss}); last.pt giữ "
                 "epoch trước"
             )
-        if scheduler is not None:
-            scheduler.step(val_loss)
         metrics = validation_metrics(model, cfg, val_rows, device)
+        value = monitor_value(*monitor, val_loss, metrics)
+        if scheduler is not None and value is not None:
+            scheduler.step(value)
         if torch.cuda.is_available():
             # Trả bộ nhớ đệm của lượt chấm (cửa sổ dài, không graph) trước epoch train sau.
             torch.cuda.empty_cache()
@@ -385,6 +634,7 @@ def train_one(cfg, name, seed, rows, out):
                 "epoch": epoch,
                 "train_loss": train_loss,
                 "val_loss": val_loss,
+                "monitor": value,
                 "seconds": round(time.monotonic() - tick, 1),
                 "train_parts": train_stats,
                 "val_parts": val_stats,
@@ -396,7 +646,15 @@ def train_one(cfg, name, seed, rows, out):
                 "epoch": epoch,
                 "loss/train": train_loss,
                 "loss/val": val_loss,
-                **{f"loss_train/{k}": v for k, v in train_stats.items() if k != "grad_norm"},
+                "monitor": value,
+                # Cộng dồn qua mọi epoch đã ghi (kể cả phiên trước khi train tiếp từ last.pt).
+                "train/steps": sum(e["train_parts"].get("steps", 0) for e in history["epochs"]),
+                "train/samples": sum(e["train_parts"].get("samples", 0) for e in history["epochs"]),
+                **{
+                    f"loss_train/{k}": v
+                    for k, v in train_stats.items()
+                    if k not in ("grad_norm", "steps", "samples")
+                },
                 **{f"loss_val/{k}": v for k, v in val_stats.items() if k != "grad_norm"},
                 "grad_norm": train_stats.get("grad_norm"),
                 "lr": optimizer.param_groups[0]["lr"],
@@ -408,9 +666,8 @@ def train_one(cfg, name, seed, rows, out):
                     else {}
                 ),
             },
-            step=epoch,
         )
-        improved = best is None or val_loss < best - 1e-4
+        improved = better(value, best, monitor[0])
         spent = time.monotonic() - began
         per_epoch = spent / (epoch - start + 1)
         aucs = " ".join(
@@ -419,16 +676,17 @@ def train_one(cfg, name, seed, rows, out):
             if k.startswith("val_auc/") and v is not None
         )
         status = "tốt nhất" if improved else f"chưa tốt hơn {patience + 1}/{options['patience']}"
+        shown = "-" if value is None else f"{value:.4f}"
         print(
-            f"{tag}: train {train_loss:.4f} val {val_loss:.4f} ({status})"
+            f"{tag}: train {train_loss:.4f} val {val_loss:.4f} | {monitor[0]} {shown} ({status})"
             f" | AUC val {aucs or '-'} | lr {optimizer.param_groups[0]['lr']:.2g}"
             f" | grad {train_stats.get('grad_norm', float('nan')):.2f}"
             f" | {duration(time.monotonic() - tick)} / epoch, còn tối đa "
             f"~{duration(per_epoch * (options['epochs'] - epoch))} | {system_status()}",
             flush=True,
         )
-        if best is None or val_loss < best - 1e-4:
-            best, patience = val_loss, 0
+        if improved:
+            best, patience = value, 0
             save(
                 out / "best.pt",
                 {
@@ -436,6 +694,7 @@ def train_one(cfg, name, seed, rows, out):
                     "state": model.state_dict(),
                     "epoch": epoch,
                     "val_loss": val_loss,
+                    "monitor": value,
                 },
             )
         else:
@@ -483,15 +742,18 @@ def train_one(cfg, name, seed, rows, out):
         run.summary({"stop": stop, "epochs_run": len(history["epochs"])})
         run.finish()
         return history
+    best_epoch = torch.load(out / "best.pt", map_location="cpu", weights_only=False)["epoch"]
+    chosen = next(e for e in history["epochs"] if e["epoch"] == best_epoch)
     history["complete"] = True
-    history["best_val_loss"] = best
+    history["best_epoch"] = best_epoch
+    history["best_monitor"] = best
+    history["best_val_loss"] = chosen["val_loss"]
     history["stop"] = stop
     write_json(out / "history.json", history)
     resume.unlink(missing_ok=True)  # checkpoint tạm (BL-A ~3,6 GB vì có trạng thái Adam của XLS-R)
-    best_epoch = torch.load(out / "best.pt", map_location="cpu", weights_only=False)["epoch"]
-    chosen = next(e for e in history["epochs"] if e["epoch"] == best_epoch)
     print(
-        f"{name} seed{seed} XONG: epoch tốt nhất {best_epoch} (val {best:.4f}), dừng: {stop}, "
+        f"{name} seed{seed} XONG: epoch tốt nhất {best_epoch} ({monitor[0]} {best:.4f}, val loss "
+        f"{chosen['val_loss']:.4f}), dừng: {stop}, "
         f"{len(history['epochs'])} epoch trong {duration(time.monotonic() - began)} | "
         + " ".join(
             f"{k.split('/')[1]} {v:.3f}"
@@ -503,7 +765,8 @@ def train_one(cfg, name, seed, rows, out):
     run.summary(
         {
             "best_epoch": best_epoch,
-            "best_val_loss": best,
+            "best_monitor": best,
+            "best_val_loss": chosen["val_loss"],
             "stop": stop,
             "epochs_run": len(history["epochs"]),
             "train_hours": (time.monotonic() - began) / 3600,
@@ -513,8 +776,8 @@ def train_one(cfg, name, seed, rows, out):
     run.artifact(
         f"model-{cfg.get('run_group') or Path(cfg['runs']).name}-{name}-seed{seed}",
         "model",
-        [out / "best.pt", out / "history.json"],
-        {"model": name, "seed": seed, "best_epoch": best_epoch, "best_val_loss": best},
+        [out / n for n in ("best.pt", "history.json", "architecture.json", "architecture.txt")],
+        {"model": name, "seed": seed, "best_epoch": best_epoch, "best_monitor": best},
     )
     run.finish()
     return history
@@ -612,7 +875,7 @@ def provenance(cfg, rows, selection):
         "assets": assets,
         "environment": environment(),
         # Không dò siêu tham số: baseline dùng công thức của code gốc (models.*.train_options),
-        # M1 / M2 đặt trước (settings.training); checkpoint chọn theo val loss.
+        # M1 / M2 / M3 đặt trước (settings.training); checkpoint chọn theo training.monitor.
         "hyperparameter_search": None,
         "started": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
@@ -631,8 +894,9 @@ def merge_runs(target, sources, move=False):
     """Gộp output train của nhiều notebook (chạy song song, mỗi notebook vài model) vào `target`.
 
     Mỗi <model>_seed<seed>: giữ bản xong, hoặc bản nhiều epoch hơn (kèm last.pt để train tiếp).
-    provenance.json nối danh sách (không mất lần chạy nào). Không chép kết quả test
-    (test-lock / evaluation / report / gates): test chỉ chạy một lần khi đủ mọi model.
+    provenance.json nối danh sách (không mất lần chạy nào); test-log.json nối danh sách. Kết quả
+    test của từng model đi theo thư mục model (metrics.json, predictions-*.npz); evaluation.json /
+    report / gates dựng lại ở bước report từ các thư mục đó.
     move=True: chuyển thay vì chép (lane cùng ổ đĩa; checkpoint BL-A vài GB không bị nhân đôi).
     """
     import shutil
@@ -643,8 +907,14 @@ def merge_runs(target, sources, move=False):
     records = (
         read_json(target / "provenance.json") if (target / "provenance.json").is_file() else []
     )
+    tests = read_json(target / "test-log.json") if (target / "test-log.json").is_file() else []
     for source in map(Path, sources):
-        for folder in sorted(p for p in source.iterdir() if p.is_dir()):
+        # Log setup của từng phiên (setup_log.py): giữ hết, không ghi đè phiên đã có.
+        setup = source / "setup"
+        for session in sorted(setup.iterdir()) if setup.is_dir() else []:
+            if session.is_dir() and not (target / "setup" / session.name).exists():
+                shutil.copytree(session, target / "setup" / session.name)
+        for folder in sorted(p for p in source.iterdir() if p.is_dir() and p.name != "setup"):
             mine = target / folder.name
             if run_state(folder) > run_state(mine):
                 shutil.rmtree(mine, ignore_errors=True)
@@ -655,10 +925,14 @@ def merge_runs(target, sources, move=False):
                 taken[folder.name] = source.name
         if (source / "provenance.json").is_file():
             records += [r for r in read_json(source / "provenance.json") if r not in records]
+        if (source / "test-log.json").is_file():
+            tests += [r for r in read_json(source / "test-log.json") if r not in tests]
         for name in ("benchmark.json", "training.json"):
             if (source / name).is_file() and not (target / name).exists():
                 shutil.copy2(source / name, target / name)
     write_json(target / "provenance.json", records)
+    if tests:
+        write_json(target / "test-log.json", tests)
     return taken
 
 
@@ -687,6 +961,14 @@ def train_all(cfg):
             "options": cfg["training"],
         },
     )
+    if any("_mismatch" in r for r in rows):
+        # v004: luật nhãn mismatch đã dùng (bảng đếm 0 / 1 / mask, ngưỡng, kiểm lối tắt độ trễ).
+        from vn_av_df.training.sync_labels import summary
+
+        labels = summary(rows)
+        write_json(runs / "sync_labels.json", labels)
+        flagged = [k for k, v in (labels.get("lag0_audit_avhubert") or {}).items() if v["flag"]]
+        print(f"train: nhãn mismatch {selection.get('mismatch_labels')} | cờ độ trễ {flagged}")
     record = provenance(cfg, rows, selection)
     previous = runs / "provenance.json"
     if previous.is_file():  # mỗi lần chạy (kể cả chạy tiếp) thêm một mục, không ghi đè
@@ -723,9 +1005,21 @@ def train_all(cfg):
             flush=True,
         )
         history = train_one(cfg, name, seed, rows, folder)
+        if cfg.get("test_after_train") and history.get("complete"):
+            # v004: test ngay model vừa xong trên test cả 3 part (trong lane: tiến trình của lane,
+            # không chờ lane kia); checkpoint đã chấm thì evaluate_all đọc lại, không chấm thêm.
+            from vn_av_df.training.evaluate import evaluate_all
+
+            scores = evaluate_all(cfg, models=[name]).get(f"{name}_seed{seed}", {})
+            print(
+                f"=== TEST {name} seed{seed}: "
+                + " ".join(f"{k} {v:.3f}" for k, v in scores.items() if v is not None),
+                flush=True,
+            )
         report[f"{name}_seed{seed}"] = {
             "epochs": len(history["epochs"]),
-            "best_val_loss": history.get("best_val_loss"),
+            "best_epoch": history.get("best_epoch"),
+            "best_monitor": history.get("best_monitor"),
             "stop": history.get("stop"),
         }
     print(f"train xong {len(jobs)} lượt trong {duration(time.monotonic() - began)}", flush=True)

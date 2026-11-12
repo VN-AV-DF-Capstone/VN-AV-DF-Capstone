@@ -1,7 +1,7 @@
-"""Log W&B cho quá trình train v003: trích feature, train, test, báo cáo (bằng chứng cho báo cáo).
+"""Log W&B: trích feature, train, test, báo cáo (kèm setup của phiên, setup_log.py) làm bằng chứng.
 
 Bật bằng cfg["wandb"] (notebook prepare / train đặt; project để private):
-    {"project": "vn-av-df-v003", "entity": None, "mode": "online"}
+    {"project": "vn-av-df-v005", "entity": None, "mode": "online"}
 Không đặt cfg["wandb"] thì mọi hàm ở đây không làm gì: local và test không cần cài wandb.
 Không đẩy ảnh / video người thật; chỉ số liệu, bảng, biểu đồ và file kết quả.
 
@@ -11,6 +11,7 @@ phiên sau mở lại đúng run (resume) khi chạy tiếp sau khi bị ngắt.
 
 import math
 import os
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -18,7 +19,7 @@ import numpy as np
 
 from vn_av_df.common.runtime import read_json, write_json
 
-PROJECT = "vn-av-df-v003"
+PROJECT = "vn-av-df-v005"
 
 
 class Run:
@@ -36,6 +37,13 @@ class Run:
             clean = {k: v for k, v in data.items() if v is not None and not _nan(v)}
             self.run.log(clean, step=step) if step is not None else self.run.log(clean)
 
+    def step_axis(self, key):
+        """Mọi metric vẽ theo `key` (run train: "train/steps", điểm theo bước và điểm theo epoch chung một
+        trục). Log của run như vậy không truyền `step=`: W&B bỏ dữ liệu khi step tụt."""
+        if self.active:
+            self.run.define_metric(key)
+            self.run.define_metric("*", step_metric=key)
+
     def summary(self, data):
         if self.active:
             for k, v in data.items():
@@ -47,6 +55,17 @@ class Run:
             self.run.log(
                 {key: self.wandb.Table(columns=list(columns), data=[list(r) for r in rows])}
             )
+
+    def tables(self, tables):
+        """{key: (cột, dòng)} log một lần, commit=False: không tăng step (run log epoch theo step)."""
+        if self.active:
+            data = {
+                key: self.wandb.Table(columns=list(columns), data=[list(r) for r in rows])
+                for key, (columns, rows) in tables.items()
+                if rows
+            }
+            if data:
+                self.run.log(data, commit=False)
 
     def hist(self, key, values):
         values = [float(v) for v in values if v is not None and not _nan(v)]
@@ -71,10 +90,15 @@ class Run:
         if not self.active:
             return
         art = self.wandb.Artifact(name, type=kind, metadata=metadata or {})
+        paths = [Path(p) for p in paths]
+        # Nhiều model cùng tên file (metrics.json): mọi file trùng tên đặt dưới thư mục model.
+        # Thiếu điều này W&B báo "Cannot add the same path twice" (test part 1, 26/10).
+        names = Counter(p.name for p in paths if p.is_file())
         added = False
-        for path in map(Path, paths):
+        for path in paths:
             if path.is_file():
-                art.add_file(str(path))
+                key = path.name if names[path.name] == 1 else f"{path.parent.name}/{path.name}"
+                art.add_file(str(path), name=key)
                 added = True
             elif path.is_dir():
                 art.add_dir(str(path), name=path.name)
@@ -92,8 +116,9 @@ def _nan(value):
     return isinstance(value, float) and (math.isnan(value) or math.isinf(value))
 
 
-def open_run(cfg, job_type, name, group=None, config=None, folder=None, tags=()):
-    """Mở run; `folder` có thì lưu id để phiên sau tiếp tục đúng run."""
+def open_run(cfg, job_type, name, group=None, config=None, folder=None, tags=(), with_setup=False):
+    """Mở run; `folder` có thì lưu id để phiên sau tiếp tục đúng run. with_setup: đính kèm setup
+    của phiên (setup_log.attach), cho run chính của phiên (prepare, train, labels, report)."""
     options = cfg.get("wandb")
     if not options:
         return Run()
@@ -129,13 +154,18 @@ def open_run(cfg, job_type, name, group=None, config=None, folder=None, tags=())
             record,
             {"id": run.id, "name": name, "display": display, "job_type": job_type, "group": group},
         )
-    return Run(wandb, run)
+    opened = Run(wandb, run)
+    if with_setup:
+        from vn_av_df.setup_log import attach
+
+        attach(opened, cfg)
+    return opened
 
 
 # ---------------------------------------------------------------- nội dung dùng chung
-def lag_profile(a, v, valid, max_lag=15):
-    """Độ lệch tốt nhất giữa đặc trưng tiếng và hình (cos trung bình theo độ lệch, như
-    SpeechForensics); dương = tiếng trễ. Trả (lag, độ nhọn = max − median)."""
+def lag_curve(a, v, valid, max_lag=15):
+    """Cos trung bình giữa tiếng frame t và hình frame t − δ, δ ∈ [−max_lag, max_lag] (như
+    SpeechForensics); chỉ số i ↔ tiếng trễ δ = i − max_lag frame. NaN khi < 10 frame chồng lên."""
     a = a / (np.linalg.norm(a, axis=1, keepdims=True) + 1e-8)
     v = v / (np.linalg.norm(v, axis=1, keepdims=True) + 1e-8)
     n = len(a)
@@ -148,7 +178,13 @@ def lag_profile(a, v, valid, max_lag=15):
         keep = valid[lo:hi] & valid[lo - lag : hi - lag]
         sims = (a[lo:hi] * v[lo - lag : hi - lag]).sum(1)
         scores.append(float(sims[keep].mean()) if keep.any() else np.nan)
-    scores = np.asarray(scores)
+    return np.asarray(scores)
+
+
+def lag_profile(a, v, valid, max_lag=15):
+    """Độ lệch tốt nhất giữa đặc trưng tiếng và hình; dương = tiếng trễ. Trả (lag, độ nhọn =
+    max − median)."""
+    scores = lag_curve(a, v, valid, max_lag)
     if np.all(np.isnan(scores)):
         return None, None
     best = int(np.nanargmax(scores))

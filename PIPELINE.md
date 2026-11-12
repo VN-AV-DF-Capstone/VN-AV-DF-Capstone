@@ -3,11 +3,12 @@
 ```
 src/data (real, local) ─► part sạch vn-av-df-data-partN (600-800 clip, 20 nam + 20 nữ × 15-20 clip, split sẵn)
   └─► notebooks/generate.ipynb   phiên "voice" → các phiên "lipsync" → finalize      (src/generators/0x_*.py)
-  └─► notebooks/prepare.ipynb    phiên "landmarks" (CPU, dlib) → song song phiên "cpu" (crop miệng, khung LIPINC, waveform) và "gpu" (AV-HuBERT Large, XLS-R) (src/models/v003/01_prepare.py)
-  └─► notebooks/train.ipynb      train 4 baseline + M1, M2 + 3 ablation → test một lần → report.md  (src/models/v003/02-04)
+  └─► notebooks/prepare.ipynb    phiên "landmarks" (CPU, dlib) → song song phiên "cpu" (crop miệng, khung LIPINC, waveform) và "gpu" (AV-HuBERT Large, XLS-R), mỗi biến thể v005 hai phiên: "<v>-cpu" (CPU, không tốn quota: nén lại + crop miệng) rồi "<v>" (T4 ×2: AV-HuBERT, XLS-R trên clip đã nén; một phiên làm cả ba vượt Output 20 GB) cho "c480", "c360" (dùng khi train), "pr" (real / sham / voice qua xử lý lành tính giống đường ống generator; validation + test), "w360", "c288" (chỉ test) (src/models/v005/01_prepare.py)
+  └─► (local) đo SyncNet + nhãn mismatch đo được (src/models/v005/01a, 01b)
+  └─► notebooks/train.ipynb      train baseline + M2 + M3-R (+ ablation) → test một lần → report.md  (src/models/v005/02-04)
 ```
 
-Mỗi bước chạy được ở local bằng script trong `src/generators/` và `src/models/v003/`, hoặc trên Kaggle bằng notebook tương ứng; cả hai cách gọi cùng các lệnh trong `src/vn_av_df/cli.py`. Cấu hình nằm ở `settings.py` (local) và các cell đầu của notebook (Kaggle). Pipeline dữ liệu real: [src/data/README.md](src/data/README.md).
+Mỗi bước chạy được ở local bằng script trong `src/generators/` và `src/models/v005/` (v003, v004: `src/models/v003/`, `src/models/v004/`, cùng `settings.py` hiện tại nên chạy theo cấu hình v005; chạy đúng v004 thì checkout `f28a57b`; v006, v007 chỉ chạy local: `src/models/v006/`, `src/models/v007/` với đội hình riêng, cách train như v005, xem [src/models/README.md](src/models/README.md)), hoặc trên Kaggle bằng notebook tương ứng; cả hai cách gọi cùng các lệnh trong `src/vn_av_df/cli.py`. Cấu hình nằm ở `settings.py` (local) và các cell đầu của notebook (Kaggle). Pipeline dữ liệu real: [src/data/README.md](src/data/README.md).
 
 | Bước | Script local | Code (trong `src/vn_av_df/`) |
 |---|---|---|
@@ -16,12 +17,14 @@ Mỗi bước chạy được ở local bằng script trong `src/generators/` v�
 | Phiên giọng (①②③ + track B) | `src/generators/02_voice.py` | `generation/voice/`, `generation/generate.py` |
 | Phiên lip-sync (④⑤⑥) | `src/generators/03_lipsync.py --generators ...` | `generation/lipsync.py`, `generation/generate.py` |
 | Gom → manifest có nhãn | `src/generators/04_finalize.py` | `generation/generate.py` |
-| Tải encoder + tài sản model | `src/models/v003/00_setup.py` | `assets.py`, `cli.py` (`model_assets`) |
-| Trích feature (bước riêng, dùng lại cho mọi model / seed / lần train / demo) | `src/models/v003/01_prepare.py [--encoders ...]` | `training/prepare.py`, `features/` |
-| Đo thời gian / bộ nhớ train (tuỳ chọn) | `src/models/v003/05_benchmark.py [--synthetic] [--models ...]` | `training/benchmark.py` |
-| Train (chạy lại thì tiếp từ epoch đã xong) | `src/models/v003/02_train.py [--models ...] [--seeds ...]` | `training/train.py`, `training/models.py` |
-| Test một lần | `src/models/v003/03_evaluate.py` | `training/evaluate.py` |
-| Báo cáo | `src/models/v003/04_report.py` | `training/report.py` |
+| Tải encoder + tài sản model | `src/models/v005/00_setup.py` | `assets.py`, `cli.py` (`model_assets`) |
+| Trích feature (bước riêng, dùng lại cho mọi model / seed / lần train / demo) | `src/models/v005/01_prepare.py [--encoders ...]` | `training/prepare.py`, `features/` |
+| v004-v005: đo SyncNet real + lip-sync (local, CPU) → `<part>/sync_syncnet.json` | `src/models/v005/01a_syncnet.py [--workers N] [--limit N]` | `training/syncnet_measure.py` |
+| v004-v005: nhãn mismatch đo được + kiểm (sau prepare, trước train) | `src/models/v005/01b_sync_labels.py` | `training/sync_labels.py` |
+| Đo thời gian / bộ nhớ train (tuỳ chọn) | `src/models/v005/05_benchmark.py [--synthetic] [--models ...]` | `training/benchmark.py` |
+| Train (chạy lại thì tiếp từ epoch đã xong) | `src/models/v005/02_train.py [--models ...] [--seeds ...]` | `training/train.py`, `training/models.py` |
+| Test một lần | `src/models/v005/03_evaluate.py` | `training/evaluate.py` |
+| Báo cáo | `src/models/v005/04_report.py` | `training/report.py` |
 
 Môi trường worker (generator, TTS, AV-HuBERT): [environments/README.md](environments/README.md).
 
@@ -160,7 +163,7 @@ Chạy ở phiên tương tác có GPU, mở link `gradio.live` in ra ở cell c
 
   Hai stage AV-HuBERT cho kết quả trùng từng giá trị với chạy một mạch (test `test_avhubert_two_stages_match_single_stage`). Nhiều part: mỗi part prepare riêng; notebook train nhận danh sách mọi part (`DATASET_PARTS`) và mọi cache (`CACHES`), mỗi mẫu được tìm ở mọi thư mục cache.
 - **Output Kaggle:** weight và repo upstream nằm ở `/kaggle/temp` (liên kết từ `weights/`, `external/`), worker env ở `/kaggle/temp/vn-av-df-workers`; cuối phiên chỉ giữ phần cần (prepare: cache; train: `runs/`; generate: dataset + plan), kể cả khi prepare lỗi giữa chừng.
-- **Train:** 2 notebook song song, mỗi notebook 2 GPU (`LANES`, `training/lanes.py`): `-ta` = BL-A | M1, M2, BL-V (test khi đủ cả 10 model); `-tb` = BL-M, BL-M/sup, `no_trace` | `no_sync`, `no_ref` (`RUN_TEST = False`). Đo part 1: BL-A 9,5 phút / epoch, M1 ~15 phút / epoch. Hết `MAX_HOURS` (11) thì dừng sạch, `-ta-2` / `-tb-2` (Copy & Edit, `PREVIOUS_RUN` = Output phiên trước; `-ta-2` gộp cả `-tb`) train tiếp; test + report tự chạy một lần ở phiên `-ta` đầu tiên đủ cả 10 model. Ước lượng cả đội hình (○): part 1 · 1 seed ~10-25 giờ phiên; 3 part · 3 seed ~80-300 giờ GPU. Đo thật bằng `src/models/v003/05_benchmark.py`.
+- **Train (v004, v005):** theo lượt `GROUP` trong `notebooks/train.ipynb` (`settings.TRAIN_GROUPS`): `labels` (CPU: nhãn mismatch + kiểm, xem trước khi train) → mỗi bước **một model**, một GPU (v005, chốt 07/11/2026: `M3-R` = trihead_v5 kèm benchmark, `M3-R-nopair`, `M2`, `BL-M`, `BL-Msup`, `BL-A2`, `BL-V`; tuỳ chọn, chưa chạy: `M3-R-quality`, `M3-R-clean`, `BL-A`; 11/11 bỏ `M1` và `M3` (trihead_v4) khỏi đội hình, code giữ trong `models.SPECS`). Mọi model train thấy bản nén 480p và 360p (`settings.VARIANTS` có `"train": True`, `training.variant_p`; M3-R theo cặp sạch ↔ nén) và được test thêm trên mọi biến thể (c480, c360, PR: AUC khớp đường ống + FPR theo họ xử lý, w360 / c288: mức chưa thấy); video có cạnh ngắn dưới `settings.VISUAL_MIN_SHORT_SIDE` (360) không xét hình, AI? theo đầu audio (cổng độ phân giải, cả ở demo); train xong hết thì `test` (chấm test cả 3 part, ghép muộn, cổng, `report.md`) → `report` (CPU: ghép muộn, cổng, `report.md`). Hai bước ghép một phiên T4 ×2 (`settings.TRAIN_SESSIONS`: P1-P5, mỗi GPU một hàng), notebook `vn-av-df-train-<P…>`; hàng đầu dùng riêng GPU0, các hàng sau chia GPU1; phiên train chỉ train, test một lần ở `GROUP = "test"` (một run W&B); đầu phiên chép cache cần sang `/kaggle/temp` (`training/stage.py`); hết `MAX_HOURS` (11,5, tính từ đầu phiên) thì dừng sạch, phiên sau gắn `PREVIOUS_RUN` để train tiếp (Output phiên sau đã gộp phiên trước, nên chỉ cần gắn phiên gần nhất). Lượt v005 thật (10-11/11): `P1` → `P2` → bước lẻ `GROUP = "M3-R-nopair"` → `test`; kết quả: `docs/v005_report.md`. Run W&B của mỗi phiên đính kèm luôn cách cài phiên (`src/vn_av_df/setup_log.py`, config `setup`, bảng `setup/*`, artifact `setup-log`); mỗi run train ghi `architecture.json`. Chọn checkpoint theo AUC validation (`training.monitor`). Kế hoạch và giờ ước: `RESEARCH_WORKLOG/v004_model.md` §8 của Linh (chưa có trên git). Lệnh local: `src/models/v005/`. Đo part 1 (v003): BL-A 9,5 phút / epoch, M1 ~15 phút / epoch.
 
 ## Kiểm thử
 

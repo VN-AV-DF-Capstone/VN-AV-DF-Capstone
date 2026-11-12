@@ -10,10 +10,20 @@ phiên Kaggle không GPU (không tốn quota GPU). dlib dò mặt chiếm ~86 % 
 
 Cache: <cfg["cache"]>/<encoder>/<sample_id>.npz (+ .json). Chạy lại thì bỏ qua cache còn khớp
 chữ ký; dừng giữa chừng không làm hỏng cache (ghi file tạm rồi đổi tên).
+
+Biến thể nén (v005, RESEARCH_WORKLOG/v005_model.md): cfg["variant"] = {"name": "c480",
+"height": 480, "crf": 30, "audio_bitrate": "64k"} → trước các encoder, nén lại video + tiếng từng mẫu
+(ffmpeg libx264 + AAC, giữ số frame) vào <cfg["cache"][0]>/clips/, rồi trích avhubert / mouth / xlsr
+trên bản nén vào cfg["cache"][0]. Landmark (stage landmarks) dùng lại của bản gốc (các thư mục cache
+sau trong danh sách): cùng tỉ lệ khung, toạ độ chuẩn hoá theo cạnh dài 640, cùng số frame.
 """
 
+import hashlib
 import os
 import queue
+import re
+import shutil
+import subprocess
 import threading
 import time
 from collections import defaultdict
@@ -27,7 +37,7 @@ from vn_av_df.dataset import media_path, training_dataset
 from vn_av_df.progress import Progress, duration, system_status
 from vn_av_df.training.data import cache_file, cache_roots
 
-ORDER = ("landmarks", "avhubert", "mouth", "lipinc", "xlsr", "wave")
+ORDER = ("landmarks", "avhubert", "mouth", "lipinc", "xlsr", "wave", "syll")
 # needs của model → encoder phải có (avhubert, mouth, lipinc đọc landmark / hộp miệng từ landmarks).
 NEEDS = {
     "av": ("landmarks", "avhubert"),
@@ -36,6 +46,8 @@ NEEDS = {
     "lipinc": ("landmarks", "avhubert", "lipinc"),
     "ssl": ("xlsr",),
     "wave": ("wave",),
+    "prosody": ("landmarks", "avhubert", "mouth", "wave"),  # M3: ngữ điệu ↔ đầu (prosody.py)
+    "syll": ("syll",),  # v007 (M7): PhoWhisper trên tiếng của mẫu (features/syllables.py)
 }
 
 
@@ -83,18 +95,303 @@ def make(cfg, name, device):
         from vn_av_df.features.encoders import WaveEncoder
 
         return WaveEncoder(spec)
+    if name == "syll":
+        from vn_av_df.features.syllables import SyllableEncoder
+
+        return SyllableEncoder(spec)
     raise ValueError(f"Unknown encoder {name}")
 
 
+def ffmpeg_binary():
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    import imageio_ffmpeg
+
+    return imageio_ffmpeg.get_ffmpeg_exe()
+
+
+def variant_selection(spec, rows):
+    """Mẫu của biến thể: `splits` (mức chỉ để test: ["test"]) và `cells` (PR: real / sham / voice)."""
+    splits, cells = spec.get("splits"), spec.get("cells")
+    return [
+        r
+        for r in rows
+        if (not splits or r["split"] in splits) and (not cells or r.get("cell") in cells)
+    ]
+
+
+def processed_real_chain(spec, row):
+    """Chuỗi xử lý PR của clip nguồn (cố định theo sha1 tên biến thể + source_clip_id; real / sham /
+    voice cùng clip nguồn chung một chuỗi): (họ, u ∈ [0, 1] chọn tham số). Train / validation dùng
+    `families`; test chia đôi theo hash: một nửa họ đã thấy, một nửa `heldout_families` (chưa thấy)."""
+    digest = hashlib.sha1(f"{spec['name']}:{row['source_clip_id']}".encode()).digest()
+    pool = spec["families"]
+    if row["split"] == "test" and spec.get("heldout_families") and digest[2] % 2:
+        pool = spec["heldout_families"]
+    return pool[digest[0] % len(pool)], digest[1] / 255
+
+
+def processed_real_middle(family, u, width, height):
+    """Bước giữa của chuỗi PR, giả lập codec / xử lý trong đường ống generator mà không đổi nội
+    dung miệng: (đuôi file, tham số ffmpeg). Đo 07/11 (RESEARCH_WORKLOG/v005_model.md §8)."""
+    if family == "mp4v":
+        return ".avi", ["-c:v", "mpeg4", "-q:v", str(3 + round(u * 5))]
+    if family == "mjpeg":
+        return ".avi", ["-c:v", "mjpeg", "-q:v", str(3 + round(u * 4)), "-pix_fmt", "yuvj420p"]
+    if family == "rescale":
+        f = 0.5 + 0.3 * u
+        return ".mp4", [
+            "-vf",
+            f"scale=trunc(iw*{f:.3f}/2)*2:-2:flags=bicubic,scale={width}:{height}:flags=bicubic",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "8",
+        ]
+    if family == "x264mid":
+        return ".mp4", ["-c:v", "libx264", "-preset", "veryfast", "-crf", str(20 + round(u * 8))]
+    if family == "vp9":
+        return ".webm", [
+            "-c:v",
+            "libvpx-vp9",
+            "-crf",
+            str(30 + round(u * 15)),
+            "-b:v",
+            "0",
+            "-deadline",
+            "realtime",
+            "-cpu-used",
+            "8",
+        ]
+    if family == "denoise_sharpen":
+        return ".mp4", [
+            "-vf",
+            "hqdn3d=4:3:6:4.5,unsharp=5:5:0.8",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "8",
+        ]
+    if family == "mpeg2":
+        return ".mpg", ["-c:v", "mpeg2video", "-q:v", str(4 + round(u * 4))]
+    raise ValueError(f"không biết họ xử lý {family}")
+
+
+def video_size(ffmpeg, path):
+    probe = subprocess.run(
+        [ffmpeg, "-hide_banner", "-i", str(path)], capture_output=True, text=True
+    ).stderr
+    found = re.search(r"Video:.*?(\d{2,5})x(\d{2,5})", probe)
+    if not found:
+        raise RuntimeError(f"không đọc được kích thước video {path}")
+    return int(found.group(1)), int(found.group(2))
+
+
+def reencode(cfg, rows):
+    """Nén lại / xử lý từng mẫu theo cfg["variant"] → {sample_id: đường dẫn mp4}; có sẵn thì bỏ qua.
+
+    - mức nén (mặc định): scale về `height`, `video_codec` (libx264 + `preset` + `crf`, hoặc
+      libvpx-vp9 + `crf`) và `audio_codec` (aac / libopus) + `audio_bitrate`;
+    - `kind` = "processed_real" (PR): video của clip nguồn đi qua x264 CRF 8 → bước giữa
+      (processed_real_middle) → về đúng kích thước gốc, x264 CRF 18 (như đầu ra generator), một lần
+      mỗi clip nguồn; rồi ghép lại nguyên tiếng của từng mẫu (tiếng không đổi, nhãn giữ nguyên)."""
+    spec = cfg["variant"]
+    folder = cache_roots(cfg)[0] / "clips"
+    folder.mkdir(parents=True, exist_ok=True)
+    # Clip đã nén ở phiên khác (phiên "<biến thể>-cpu" trong OTHER_CACHES): dùng lại, không nén lại.
+    wanted = {r["sample_id"] for r in rows}
+    found = {
+        f.stem: f
+        for root in reversed(cache_roots(cfg))
+        if (root / "clips").is_dir()
+        for f in (root / "clips").glob("*.mp4")
+        if f.stem in wanted and not f.name.endswith(".tmp.mp4")
+    }
+    ffmpeg = ffmpeg_binary()
+    options = subprocess.run(
+        [ffmpeg, "-hide_banner", "-h", "full"], capture_output=True, text=True
+    ).stdout
+    sync = ["-fps_mode", "passthrough"] if "fps_mode" in options else ["-vsync", "passthrough"]
+    began, failed = time.perf_counter(), []
+
+    def compress(row):
+        out = folder / f"{row['sample_id']}.mp4"
+        if row["sample_id"] in found:
+            return
+        tmp = out.with_suffix(".tmp.mp4")
+        codec = spec.get("video_codec", "libx264")
+        video = ["-c:v", codec, "-crf", str(spec["crf"])] + (
+            ["-preset", spec.get("preset", "veryfast")]
+            if codec == "libx264"
+            else ["-b:v", "0", "-deadline", "realtime", "-cpu-used", "8"]
+        )
+        command = [
+            ffmpeg,
+            "-y",
+            "-v",
+            "error",
+            "-i",
+            str(media_path(cfg["dataset"], row)),
+            "-vf",
+            f"scale=-2:{int(spec['height'])}",
+            *video,
+            "-pix_fmt",
+            "yuv420p",
+            *sync,
+            "-c:a",
+            spec.get("audio_codec", "aac"),
+            "-b:a",
+            str(spec["audio_bitrate"]),
+            str(tmp),
+        ]
+        result = subprocess.run(command, capture_output=True, text=True)
+        if result.returncode != 0:
+            failed.append(f"{row['sample_id']}: {result.stderr[-300:]}")
+            return
+        os.replace(tmp, out)
+
+    def process_real(group):
+        todo = [r for r in group if r["sample_id"] not in found]
+        if not todo:
+            return
+        # real / sham / voice của một clip nguồn chung dòng bit video (đo 07/11: cùng MD5).
+        source = next((r for r in group if r.get("cell") == "real"), group[0])
+        family, u = processed_real_chain(spec, source)
+        stem = folder / f"{source['source_clip_id']}.pr"
+        src = media_path(cfg["dataset"], source)
+        width, height = video_size(ffmpeg, src)
+        ext, middle = processed_real_middle(family, u, width, height)
+        steps = [
+            (
+                src,
+                ["-c:v", "libx264", "-preset", "veryfast", "-crf", "8", "-pix_fmt", "yuv420p"],
+                f"{stem}.a.mp4",
+            ),
+            (f"{stem}.a.mp4", middle, f"{stem}.b{ext}"),
+            (
+                f"{stem}.b{ext}",
+                [
+                    "-vf",
+                    f"scale={width}:{height}",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "medium",
+                    "-crf",
+                    "18",
+                    "-pix_fmt",
+                    "yuv420p",
+                ],
+                f"{stem}.c.mp4",
+            ),
+        ]
+        try:
+            for inp, args, out in steps:
+                result = subprocess.run(
+                    [ffmpeg, "-y", "-v", "error", "-i", str(inp), "-an", *args, *sync, str(out)],
+                    capture_output=True,
+                    text=True,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(f"{family}: {result.stderr[-300:]}")
+            for row in todo:
+                out = folder / f"{row['sample_id']}.mp4"
+                tmp = out.with_suffix(".tmp.mp4")
+                result = subprocess.run(
+                    [
+                        ffmpeg,
+                        "-y",
+                        "-v",
+                        "error",
+                        "-i",
+                        f"{stem}.c.mp4",
+                        "-i",
+                        str(media_path(cfg["dataset"], row)),
+                        "-map",
+                        "0:v:0",
+                        "-map",
+                        "1:a:0",
+                        "-c",
+                        "copy",
+                        "-shortest",
+                        str(tmp),
+                    ],
+                    capture_output=True,
+                    text=True,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(f"ghép tiếng: {result.stderr[-300:]}")
+                os.replace(tmp, out)
+        except Exception as exc:
+            failed.append(f"{source['source_clip_id']}: {str(exc)[:300]}")
+        finally:
+            for leftover in folder.glob(f"{source['source_clip_id']}.pr.*"):
+                leftover.unlink()
+
+    if spec.get("kind") == "processed_real":
+        groups = defaultdict(list)
+        for row in rows:
+            groups[row["source_clip_id"]].append(row)
+        one, jobs = process_real, list(groups.values())
+        plan = {
+            row["sample_id"]: list(
+                processed_real_chain(spec, next((r for r in g if r.get("cell") == "real"), g[0]))
+            )
+            for g in jobs
+            for row in g
+        }
+    else:
+        one, jobs, plan = compress, rows, None
+    workers = int(spec.get("workers") or os.cpu_count() or 1)
+    with (
+        Progress(f"reencode {spec['name']}", len(jobs)) as progress,
+        ThreadPoolExecutor(workers) as pool,
+    ):
+        for _ in pool.map(one, jobs):
+            progress.step()
+    if failed:
+        raise RuntimeError(f"reencode: {len(failed)} mẫu lỗi: " + " | ".join(failed[:5]))
+    write_json(
+        folder / "reencode.json",
+        {
+            **spec,
+            "samples": len(rows),
+            "elapsed_s": time.perf_counter() - began,
+            "ffmpeg": ffmpeg,
+            **({"chains": plan} if plan else {}),
+        },
+    )
+    print(
+        f"== reencode {spec['name']} xong: {len(rows)} mẫu trong {duration(time.perf_counter() - began)}",
+        flush=True,
+    )
+    return {
+        r["sample_id"]: found.get(r["sample_id"], folder / f"{r['sample_id']}.mp4") for r in rows
+    }
+
+
 def prepare(cfg, encoders=ORDER, factory=None):
-    rows, selection = training_dataset(cfg, verify_media=False)
+    rows, selection = training_dataset(cfg, verify_media=False, labels=False)
     cache = cache_roots(cfg)[0]
     reports = {}
     chosen = [e for e in ORDER if e in encoders]
+    clips = None
+    if cfg.get("variant"):
+        # Biến thể nén / PR: landmark lấy của bản gốc; không trích lipinc / wave (model v005 không cần).
+        # syll (M7): ASR chạy lại trên tiếng đã nén, như khi gặp video nén thật.
+        chosen = [e for e in chosen if e in ("avhubert", "mouth", "xlsr", "syll")]
+        rows = variant_selection(cfg["variant"], rows)
+    # Run W&B mở trước khi nén clip (bước nén của phiên "<v>-cpu" mất ~2 giờ): thấy phiên ngay từ đầu.
     run = tracking.open_run(
         cfg,
         "prepare",
-        f"{cache.name}-prepare-{'+'.join(chosen)}",
+        # 3 part cùng encoder: tên theo phiên (prepare-p<N>-<phiên>) để không trùng giữa các part.
+        f"{cfg.get('session') or cache.name + '-prepare'}-{'+'.join(chosen)}",
         group=cache.name,
         config={
             "encoders": {e: cfg["encoders"][e] for e in chosen},
@@ -102,7 +399,12 @@ def prepare(cfg, encoders=ORDER, factory=None):
             "samples": len(rows),
         },
         folder=cache,
+        with_setup=True,
     )
+    if cfg.get("variant"):
+        tick = time.perf_counter()
+        clips = reencode(cfg, rows)
+        run.log({"reencode/samples": len(clips), "reencode/seconds": time.perf_counter() - tick})
     print(
         f"prepare: {len(rows)} mẫu, encoder {chosen} → {cache} | "
         f"thiết bị {cfg.get('prepare_devices') or ['cpu']} | {system_status()}",
@@ -147,7 +449,8 @@ def prepare(cfg, encoders=ORDER, factory=None):
         guard, done, first, failed = threading.Lock(), [0], [None], []
 
         def run_row(encoder, row):
-            request = {"video": str(media_path(cfg["dataset"], row))}
+            video = clips[row["sample_id"]] if clips else media_path(cfg["dataset"], row)
+            request = {"video": str(video)}
             if name in ("mouth", "lipinc"):
                 request["box_cache"] = str(landmark_file(cfg, row["sample_id"]))
             elif name == "avhubert" and cache_file(cfg, "landmarks", row["sample_id"]).is_file():
@@ -215,6 +518,12 @@ def prepare(cfg, encoders=ORDER, factory=None):
                 getattr(available.get(), "close", lambda: None)()
         elapsed = time.perf_counter() - began
         quality = {**cache_quality(name, folder, rows), **log_cache(run, name, folder, rows)}
+        if name == "avhubert":
+            # v004: đường cong khớp theo độ trễ cho mọi mẫu (thước AV-HuBERT của nhãn mismatch đo
+            # được, training/sync_labels.py); rẻ, chỉ đọc lại cache vừa trích.
+            from vn_av_df.training.sync_labels import avhubert_profiles
+
+            quality["sync_profile"] = avhubert_profiles(cfg, rows, folder)
         write_json(
             folder / "extraction.json",
             {
