@@ -47,7 +47,7 @@ NEEDS = {
     "ssl": ("xlsr",),
     "wave": ("wave",),
     "prosody": ("landmarks", "avhubert", "mouth", "wave"),  # M3: ngữ điệu ↔ đầu (prosody.py)
-    "syll": ("syll",),  # v007 (M7): PhoWhisper trên tiếng của mẫu (features/syllables.py)
+    "syll": ("syll",),  # v008 (M7): PhoWhisper trên tiếng của mẫu (features/syllables.py)
 }
 
 

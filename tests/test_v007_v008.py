@@ -1,6 +1,7 @@
-"""v006 (M6 trihead_v3, P4, P6) và v007 (M7 ViSyl, thẻ âm tiết): kiểm thành phần mới."""
+"""v007 (M6 trihead_v3, P4, P6) và v008 (M7 ViSyl, thẻ âm tiết): kiểm thành phần mới."""
 
 import random
+import sys
 
 import numpy as np
 import pytest
@@ -222,17 +223,21 @@ def test_p6_perfect_scorer_and_p4_reference_centering():
     assert p4["test-source-2"] > 0
 
 
-def test_version_bootstrap_keeps_v005_training_protocol():
+def test_version_bootstrap_keeps_v005_training_protocol(monkeypatch):
     import settings
 
     base = settings.config()
-    try:
-        settings.bootstrap("v007")
-        cfg = settings.config()
-        assert cfg["models"][0] == "visyl" and cfg["seeds"] == [42, 43, 44, 45, 46]
-        assert cfg["runs"].endswith("train_all_v007")
-        for key in ("training", "mismatch_labels", "encoders", "variant_specs"):
-            assert cfg[key] == base[key]  # cách train như v005 (gồm học bản nén)
-    finally:
-        settings.VERSION = None
-    assert settings.config()["models"] == settings.MODELS + settings.ABLATIONS
+    for name in ("VERSION", "TEST_MODELS", *settings.VERSIONS["v008"]):
+        monkeypatch.setattr(settings, name, getattr(settings, name))  # trả lại sau test
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    settings.bootstrap("v008")
+    cfg = settings.config()
+    assert cfg["models"][0] == "visyl" and cfg["seeds"] == [42] and cfg["version"] == "v008"
+    assert cfg["runs"].endswith("train_all_v008")
+    for key in ("training", "mismatch_labels", "encoders", "variant_specs"):
+        assert cfg[key] == base[key]  # cách train như v005 (gồm học bản nén)
+    # notebook train: mỗi bước có trong một phiên, mọi model M7 có bước train
+    steps = {s for lanes in settings.TRAIN_SESSIONS.values() for lane in lanes for s in lane}
+    assert steps == set(settings.TRAIN_GROUPS)
+    trained = [m for g in settings.TRAIN_GROUPS.values() for lane in g["lanes"] for m in lane]
+    assert sorted(trained) == sorted(settings.TEST_MODELS)

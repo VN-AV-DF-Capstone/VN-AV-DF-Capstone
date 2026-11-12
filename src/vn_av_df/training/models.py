@@ -1716,7 +1716,7 @@ class TriHeadV5(TriHeadV4):
         return total
 
 
-# ---------------------------------------------------------------- v006 · M6 (trihead_v3)
+# ---------------------------------------------------------------- v007 · M6 (trihead_v3)
 def mlp_head(width, hidden):
     return nn.Sequential(nn.Linear(width, hidden), nn.GELU(), nn.Linear(hidden, 1))
 
@@ -1750,8 +1750,8 @@ class VisualTrunk(TraceTrunk):
 
 
 class TriHeadV3(TriHeadV2):
-    """M6 (v006, đề xuất của MN; trước 11/11 gọi là v005 · M5) = M1 + bản vá P1-P4
-    (docs/v006-v007_de-xuat-detector.md §2.3; ứng với bằng chứng v004 / v005 của Linh: §0b).
+    """M6 (v007, đề xuất của MN; trước 11/11 gọi là v005 · M5, trước 12/11 là v006) = M1 + bản vá P1-P4
+    (docs/v007-v008_de-xuat-detector.md §2.3; ứng với bằng chứng v004 / v005 của Linh: §0b).
 
     - P1 sync thuần (PureSyncTrunk); P2 AV-HuBERT v vào nhánh V (VisualTrunk);
     - P3 mỗi đầu một nhánh: visual ← V, audio ← A, mismatch ← S;
@@ -1787,7 +1787,7 @@ class TriHeadV3(TriHeadV2):
         }
 
 
-# ---------------------------------------------------------------- v007 · M7 (ViSyl)
+# ---------------------------------------------------------------- v008 · M7 (ViSyl)
 UNIFORM_FRAMES = 5  # visyl_uniform_no_phon: cửa sổ đều 0,2 s, không dùng ASR
 
 
@@ -1827,8 +1827,8 @@ class UnitPool(nn.Module):
 
 
 class ViSyl(Model):
-    """M7 (v007, trước 11/11 gọi là v006 · M6) "ViSyl": detector neo theo âm tiết tiếng Việt
-    (docs/v007_sau-review.md §2).
+    """M7 (v008, trước 11/11 gọi là v006 · M6, trước 12/11 là v007) "ViSyl": detector neo theo âm tiết tiếng Việt
+    (docs/v008_sau-review.md §2).
 
     Đơn vị = âm tiết từ cache `syll` (features/syllables.py) + khoảng lặng; mỗi đơn vị gộp frame
     bằng attention pooling. Đường gộp [v, a, hồ sơ cosine ±15 tương đối (34), thẻ khẩu hình (5 × 8), vị trí]
@@ -2025,11 +2025,11 @@ SPECS = {
     "trihead_v5_quality": (TriHeadV5, {**M3R, "quality": True}),
     "trihead_v5_no_pair": (TriHeadV5, {**M3R, "consistency": 0.0}),
     "trihead_v5_clean": (TriHeadV5, {**M3R, "consistency": 0.0, "train_variants": False}),
-    # v006 · M6 (docs/v006-v007_de-xuat-detector.md §2): M1 + P1-P4, ablation cộng dồn
+    # v007 · M6 (docs/v007-v008_de-xuat-detector.md §2): M1 + P1-P4, ablation cộng dồn
     "trihead_v3": (TriHeadV3, {}),
     "trihead_v3_p1": (TriHeadV3, {"p2": False, "p3": False, "use_ref": True}),
     "trihead_v3_p123": (TriHeadV3, {"use_ref": True}),
-    # v007 · M7 ViSyl (docs/v007_sau-review.md §4.2)
+    # v008 · M7 ViSyl (docs/v008_sau-review.md §4.2)
     "visyl": (ViSyl, {}),
     "visyl_no_phon": (ViSyl, {"use_tags": False}),
     "visyl_uniform_no_phon": (ViSyl, {"use_units": False, "use_tags": False}),
