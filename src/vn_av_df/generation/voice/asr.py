@@ -22,7 +22,8 @@ class Transcriber:
         self.pipe = pipeline(
             "automatic-speech-recognition",
             model=model,
-            device=0 if device == "cuda" and torch.cuda.is_available() else -1,
+            # "cuda" hoặc "cuda:<i>" (prepare chia worker theo GPU); không có GPU thì CPU.
+            device=device if str(device).startswith("cuda") and torch.cuda.is_available() else -1,
             chunk_length_s=30,
         )
         self.model = model

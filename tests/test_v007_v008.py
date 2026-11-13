@@ -241,3 +241,20 @@ def test_version_bootstrap_keeps_v005_training_protocol(monkeypatch):
     assert steps == set(settings.TRAIN_GROUPS)
     trained = [m for g in settings.TRAIN_GROUPS.values() for lane in g["lanes"] for m in lane]
     assert sorted(trained) == sorted(settings.TEST_MODELS)
+
+
+def test_transcriber_uses_the_worker_gpu(monkeypatch):
+    """prepare đặt device = "cuda:<i>" cho từng worker: PhoWhisper phải lên đúng GPU đó, không về CPU."""
+    import types
+
+    import torch
+
+    from vn_av_df.generation.voice.asr import Transcriber
+
+    seen = []
+    fake = types.SimpleNamespace(pipeline=lambda *a, **kw: seen.append(kw["device"]))
+    monkeypatch.setitem(sys.modules, "transformers", fake)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    for device in ("cuda", "cuda:1", "cpu"):
+        Transcriber("m", device)
+    assert seen == ["cuda", "cuda:1", -1]
