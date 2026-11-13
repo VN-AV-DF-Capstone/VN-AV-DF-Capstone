@@ -420,6 +420,7 @@ Cần: 3 dataset part (có `sync_syncnet.json`, chạy `src/models/v006/01a_sync
 GROUP = "labels"      # "labels" → "P1" → "P2" → ("P3") → "test"; tuỳ chọn "P4"-"P6"; hoặc một bước lẻ, vd. "M2"
                       # v008: "P1" → "P2" → "M7" (SEEDS = [43, 44]) → "test"; v007: chỉ "test"
 KAGGLE_USER = "linhxm"  # tài khoản Kaggle chạy các phiên train (và prepare syll của v008); sửa thành của bạn
+SYLL_USER = {1: KAGGLE_USER, 2: KAGGLE_USER, 3: KAGGLE_USER}  # v008: part → tài khoản đã chạy prepare syll của part đó
 DROP = []             # bước bỏ ở phiên này, vd. ["M3-abs"] (settings.TRAIN_GROUPS)
 DATASET_PARTS = [Path(f"/kaggle/input/datasets/linhxm/{s}") for s in (
     "vn-av-df-data-part1-trim04-fake", "vn-av-df-data-part2-fake", "vn-av-df-data-part3-fake")]
@@ -432,10 +433,10 @@ VARIANT_CACHES = {v: [Path(PREPARE.format(p, s)) for p in (1, 2, 3) for s in (v,
 # v008 (M7): thêm cache syll, Output phiên prepare "syll" / "<biến thể>-syll" của KAGGLE_USER.
 from vn_av_df.training.prepare import encoders_for
 if "syll" in encoders_for(settings.TEST_MODELS):
-    MY_PREPARE = "/kaggle/input/notebooks/" + KAGGLE_USER + "/vn-av-df-prepare-p{}-{}/vn-av-df-forensics/cache/vn-av-df-data"
-    CACHES += [Path(MY_PREPARE.format(p, "syll")) for p in (1, 2, 3)]
+    MY_PREPARE = "/kaggle/input/notebooks/{}/vn-av-df-prepare-p{}-{}/vn-av-df-forensics/cache/vn-av-df-data"
+    CACHES += [Path(MY_PREPARE.format(SYLL_USER[p], p, "syll")) for p in (1, 2, 3)]
     for v in VARIANT_CACHES:
-        VARIANT_CACHES[v] += [Path(MY_PREPARE.format(p, f"{v}-syll")) for p in (1, 2, 3)]
+        VARIANT_CACHES[v] += [Path(MY_PREPARE.format(SYLL_USER[p], p, f"{v}-syll")) for p in (1, 2, 3)]
 # Output các phiên train: notebook vn-av-df-<VERSION>-<phiên> (v005: vn-av-df-train-<phiên>, runs/train_all_v005).
 RUNS = f"/kaggle/input/notebooks/{KAGGLE_USER}/vn-av-df-{settings.VERSION}-{{}}/vn-av-df-forensics/runs/" + settings.RUN_NAME
 PREVIOUS_RUN = []     # P2: [Path(RUNS.format("p1"))]; P3: [Path(RUNS.format("p2"))] (Output P2 đã gộp P1); bước lẻ: Output phiên gần nhất  (slug viết thường)

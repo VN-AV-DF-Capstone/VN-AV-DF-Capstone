@@ -254,6 +254,8 @@ def test_transcriber_uses_the_worker_gpu(monkeypatch):
     seen = []
     fake = types.SimpleNamespace(pipeline=lambda *a, **kw: seen.append(kw["device"]))
     monkeypatch.setitem(sys.modules, "transformers", fake)
+    quiet = types.SimpleNamespace(logging=types.SimpleNamespace(set_verbosity_error=lambda: None))
+    monkeypatch.setitem(sys.modules, "transformers.utils", quiet)
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     for device in ("cuda", "cuda:1", "cpu"):
         Transcriber("m", device)

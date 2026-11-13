@@ -17,7 +17,10 @@ class Transcriber:
     def __init__(self, model=MODEL, device="cuda", cache=None):
         import torch
         from transformers import pipeline
+        from transformers.utils import logging
 
+        # Mỗi clip một dòng cảnh báo "Whisper did not predict an ending timestamp": làm log Kaggle chậm.
+        logging.set_verbosity_error()
         self.cache = Path(cache) if cache else None
         self.pipe = pipeline(
             "automatic-speech-recognition",
