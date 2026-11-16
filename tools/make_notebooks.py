@@ -391,7 +391,7 @@ train = nb(
             """
 # v006 · Train từng model (nhiều hàng song song trên 2 GPU), rồi test một lần + báo cáo
 
-Chọn phiên bản ở cell đầu (`VERSION`): `"v006"` (Linh), `"v007"` (M6: chưa có bước train, chỉ `test` với `PREVIOUS_RUN` = Output train v005 của Linh), `"v008"` (M7 ViSyl: `P1` = `visyl` ‖ `visyl_uniform_no_phon`, `P2` = `visyl_no_phon` ‖ `visyl_shuffled_tags`, rồi `GROUP = "M7"` với `SEEDS = [43, 44]`, rồi `test`; cần thêm Output 9 phiên prepare `syll` của `KAGGLE_USER`). Thư mục run, project W&B và tên notebook đi theo `VERSION` (`vn-av-df-<VERSION>-<GROUP>`).
+Chọn phiên bản ở cell đầu (`VERSION`): `"v006"` (Linh), `"v007"` (M6: chưa có bước train, chỉ `test` với `PREVIOUS_RUN` = Output train v005 của Linh), `"v008"` (M7 ViSyl: `P1` = `visyl` ‖ `visyl_uniform_no_phon`, `P2` = `visyl_no_phon` ‖ `visyl_shuffled_tags`, rồi `GROUP = "M7"` với `SEEDS = [43, 44]`, rồi `test`; cần thêm Output 9 phiên prepare `syll` của các tài khoản trong `SYLL_USERS`). Thư mục run, project W&B và tên notebook đi theo `VERSION` (`vn-av-df-<VERSION>-<GROUP>`).
 
 v006 = đội hình v005 train lại trên **seed 43** (`SEEDS`), có **đo dày validation** ở 3 epoch đầu (`settings` → `training.dense_val`: thêm điểm AUC giữa epoch để thấy đường học đi lên từ 0,5; không dùng chọn checkpoint). v005 (seed 42) ở branch `v005`.
 
@@ -420,7 +420,7 @@ Cần: 3 dataset part (có `sync_syncnet.json`, chạy `src/models/v006/01a_sync
 GROUP = "labels"      # "labels" → "P1" → "P2" → ("P3") → "test"; tuỳ chọn "P4"-"P6"; hoặc một bước lẻ, vd. "M2"
                       # v008: "P1" → "P2" → "M7" (SEEDS = [43, 44]) → "test"; v007: chỉ "test"
 KAGGLE_USER = "linhxm"  # tài khoản Kaggle chạy các phiên train (và prepare syll của v008); sửa thành của bạn
-SYLL_USER = {1: KAGGLE_USER, 2: KAGGLE_USER, 3: KAGGLE_USER}  # v008: part → tài khoản đã chạy prepare syll của part đó
+SYLL_USERS = [KAGGLE_USER]  # v008: mọi tài khoản đã chạy prepare syll, vd. ["acc_a", "acc_b"]; mỗi phiên lấy ở tài khoản có Output
 DROP = []             # bước bỏ ở phiên này, vd. ["M3-abs"] (settings.TRAIN_GROUPS)
 DATASET_PARTS = [Path(f"/kaggle/input/datasets/linhxm/{s}") for s in (
     "vn-av-df-data-part1-trim04-fake", "vn-av-df-data-part2-fake", "vn-av-df-data-part3-fake")]
@@ -430,13 +430,16 @@ CACHES = [Path(PREPARE.format(p, s)) for p in (1, 2, 3) for s in ("landmarks", "
 # Biến thể (settings.VARIANTS, phiên prepare cùng tên của 3 part): train học biến thể "train" + test thêm trên mọi biến thể.
 # Mỗi biến thể 2 phiên mỗi part: "<v>-cpu" (clip nén + mouth) và "<v>" (avhubert + xlsr).
 VARIANT_CACHES = {v: [Path(PREPARE.format(p, s)) for p in (1, 2, 3) for s in (v, f"{v}-cpu")] for v in settings.VARIANTS}
-# v008 (M7): thêm cache syll, Output phiên prepare "syll" / "<biến thể>-syll" của KAGGLE_USER.
+# v008 (M7): thêm cache syll, Output phiên prepare "syll" / "<biến thể>-syll" của SYLL_USERS.
 from vn_av_df.training.prepare import encoders_for
 if "syll" in encoders_for(settings.TEST_MODELS):
     MY_PREPARE = "/kaggle/input/notebooks/{}/vn-av-df-prepare-p{}-{}/vn-av-df-forensics/cache/vn-av-df-data"
-    CACHES += [Path(MY_PREPARE.format(SYLL_USER[p], p, "syll")) for p in (1, 2, 3)]
+    def syll_cache(p, s):  # Output đã attach (không có thì trả đường dẫn đầu để báo sai)
+        paths = [Path(MY_PREPARE.format(u, p, s)) for u in SYLL_USERS]
+        return next((x for x in paths if x.is_dir()), paths[0])
+    CACHES += [syll_cache(p, "syll") for p in (1, 2, 3)]
     for v in VARIANT_CACHES:
-        VARIANT_CACHES[v] += [Path(MY_PREPARE.format(SYLL_USER[p], p, f"{v}-syll")) for p in (1, 2, 3)]
+        VARIANT_CACHES[v] += [syll_cache(p, f"{v}-syll") for p in (1, 2, 3)]
 # Output các phiên train: notebook vn-av-df-<VERSION>-<phiên> (v005: vn-av-df-train-<phiên>, runs/train_all_v005).
 RUNS = f"/kaggle/input/notebooks/{KAGGLE_USER}/vn-av-df-{settings.VERSION}-{{}}/vn-av-df-forensics/runs/" + settings.RUN_NAME
 PREVIOUS_RUN = []     # P2: [Path(RUNS.format("p1"))]; P3: [Path(RUNS.format("p2"))] (Output P2 đã gộp P1); bước lẻ: Output phiên gần nhất  (slug viết thường)
